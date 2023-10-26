@@ -7,6 +7,5 @@ members = [
 [profile.release]
 opt-level = "s"
 lto = "thin"
-codegen-units = 1   # Reduce number of codegen units to increase optimizations.
-panic = 'abort'     # Abort on panic
-strip = true        # Strip symbols from binary*
+codegen-units = 1
+strip = true
