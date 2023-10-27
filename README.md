@@ -123,4 +123,4 @@ To use this project, follow these steps:
    ```bash
    git clone https://github.com/Davidflogar/phpl
    cd phpl
-   cargo r file.php // or you can build the project
+   cargo r file.php # or you can build the project
