@@ -1,6 +1,6 @@
 # phpl - A PHP Interpreter in Rust (Work in Progress)
 
-phpl is an ongoing project aimed at developing a PHP interpreter in Rust. Please note that this project is in its early stages and cannot currently execute complete PHP files. The primary goal of this project is to deepen my understanding of Rust programming while exploring the intricacies of building a PHP interpreter.
+phpl is an ongoing project aimed at developing a PHP interpreter in Rust. Please note that this project is in its early stages and cannot currently execute complete PHP files.
 
 ## Project Overview
 
