@@ -1,14 +1,22 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::php_type::PhpValue;
+use crate::php_value::PhpValue;
 
 #[derive(Clone)]
 pub struct Environment {
-    pub vars: HashMap<String, Rc<RefCell<PhpValue>>>,
+    vars: HashMap<String, Rc<RefCell<PhpValue>>>,
+	identifiers: HashMap<String, PhpValue>,
 }
 
 impl Environment {
-    pub fn delete(&mut self, key: &str) {
+    pub fn new() -> Environment {
+        Environment {
+            vars: HashMap::new(),
+			identifiers: HashMap::new(),
+        }
+    }
+
+    pub fn delete_var(&mut self, key: &str) {
         self.vars.remove(key);
     }
 
@@ -17,11 +25,11 @@ impl Environment {
             .insert(key.to_string(), Rc::new(RefCell::new(value)));
     }
 
-    pub fn set_rc(&mut self, key: &str, value: Rc<RefCell<PhpValue>>) {
+    pub fn set_var_rc(&mut self, key: &str, value: Rc<RefCell<PhpValue>>) {
         self.vars.insert(key.to_string(), value);
     }
 
-    pub fn get(&self, key: &str) -> Option<PhpValue> {
+    pub fn get_var(&self, key: &str) -> Option<PhpValue> {
         let key = if !key.starts_with('$') {
             format!("${}", key)
         } else {
@@ -36,11 +44,16 @@ impl Environment {
         }
     }
 
-    pub fn exists(&self, key: &str) -> bool {
+    pub fn var_exists(&self, key: &str) -> bool {
         self.vars.contains_key(key)
     }
 
     pub fn get_var_with_rc(&self, key: &str) -> Option<&Rc<RefCell<PhpValue>>> {
         self.vars.get(key)
     }
+
+	pub fn get_identifier(&self, key: &str) -> Option<PhpValue> {
+		self.identifiers.get(key).cloned()
+	}
+
 }

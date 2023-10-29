@@ -1,4 +1,7 @@
-use std::{env, fs, io::Result};
+use std::{
+    env, fs,
+    io::Result,
+};
 
 use evaluator::program::eval_program;
 
@@ -15,7 +18,7 @@ fn main() -> Result<()> {
 
     let content = fs::read_to_string(file_name)?;
 
-    eval_program(content)?;
+    eval_program(&file_name, &content)?;
 
     Ok(())
 }

@@ -14,6 +14,7 @@ pub const OBJECT: &str = "object";
 pub const CALLABLE: &str = "callable";
 pub const RESOURCE: &str = "resource";
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub enum PhpValue {
     Null,
@@ -31,12 +32,11 @@ pub enum PhpValue {
 pub struct PhpError {
     pub level: ErrorLevel,
     pub message: String,
-    //pub location: String, TODO: set the error location
 }
 
 #[derive(Debug, Clone)]
 pub enum ErrorLevel {
-    Error,
+    Fatal,
     Warning,
     /*	Notice,
     UserError,
@@ -63,23 +63,23 @@ pub struct PhpCallable {
 }
 
 impl PhpValue {
-    pub fn to_string(&self) -> String {
+    pub fn to_string(&self) -> Option<String> {
         match self {
-            PhpValue::Null => "NULL".to_string(),
+            PhpValue::Null => Some("NULL".to_string()),
             PhpValue::Bool(b) => {
                 if *b {
-                    "1".to_string()
+                    Some("1".to_string())
                 } else {
-                    "".to_string()
+                    Some("".to_string())
                 }
             }
-            PhpValue::Int(i) => i.to_string(),
-            PhpValue::Float(f) => f.to_string(),
-            PhpValue::String(s) => s.to_string(),
-            PhpValue::Array(a) => todo!(),
-            PhpValue::Object(o) => o.name.clone(),
-            PhpValue::Callable(c) => c.name.clone(),
-            PhpValue::Resource(r) => todo!(),
+            PhpValue::Int(i) => Some(i.to_string()),
+            PhpValue::Float(f) => Some(f.to_string()),
+            PhpValue::String(s) => Some(s.to_string()),
+            PhpValue::Array(_) => None,
+            PhpValue::Object(_) => None,
+            PhpValue::Callable(_) => None,
+            PhpValue::Resource(_) => Some("Resource".to_string()),
         }
     }
 
@@ -104,7 +104,7 @@ impl PhpValue {
                 let error_message = "Unsupported operation".to_string();
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -127,26 +127,23 @@ impl PhpValue {
 
     /// Concatenates two values.
     pub fn concat(self, value: PhpValue) -> Result<PhpValue, PhpError> {
-        let self_clone = self.clone();
-        let value_clone = value.clone();
+        let self_as_string = self.to_string();
+        let value_as_string = value.to_string();
 
-        match (self_clone, value_clone) {
-            (PhpValue::String(s), PhpValue::String(t)) => Ok(PhpValue::String(s + &t)),
-            (PhpValue::String(s), PhpValue::Int(i)) => Ok(PhpValue::String(s + &i.to_string())),
-            (PhpValue::String(s), PhpValue::Float(f)) => Ok(PhpValue::String(s + &f.to_string())),
-            _ => {
-                let error_message = format!(
-                    "Cannot concatenate {} with {}",
-                    self.get_type(),
-                    value.get_type()
-                );
+        if self_as_string.is_none() || value_as_string.is_none() {
+            let error_message = format!(
+                "Unsupported operation: {} + {}",
+                self.get_type(),
+                value.get_type()
+            );
 
-                Err(PhpError {
-                    level: ErrorLevel::Error,
-                    message: error_message,
-                })
-            }
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: error_message,
+            });
         }
+
+        Ok(PhpValue::String(self_as_string.unwrap() + &value_as_string.unwrap()))
     }
 
     pub fn is_null(&self) -> bool {
@@ -196,7 +193,7 @@ impl Add for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -224,7 +221,7 @@ impl Sub for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -252,7 +249,7 @@ impl Mul for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -280,7 +277,7 @@ impl Div for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -308,7 +305,7 @@ impl Rem for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -341,7 +338,7 @@ impl BitAnd for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -374,7 +371,7 @@ impl BitOr for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -407,7 +404,7 @@ impl BitXor for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -440,7 +437,7 @@ impl Shl for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -473,7 +470,7 @@ impl Shr for PhpValue {
                 );
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -493,7 +490,7 @@ impl Not for PhpValue {
                 let error_message = format!("Unsupported operation: !{}", self.get_type());
 
                 Err(PhpError {
-                    level: ErrorLevel::Error,
+                    level: ErrorLevel::Fatal,
                     message: error_message,
                 })
             }
@@ -567,7 +564,7 @@ impl PhpObject {
             Ok(false)
         } else {
             Err(PhpError {
-                level: ErrorLevel::Error,
+                level: ErrorLevel::Fatal,
                 message: "Right side of instanceof must be an object".to_string(),
             })
         }
