@@ -17,7 +17,7 @@ use php_parser_rs::{
     },
 };
 
-use crate::helpers::include_php_file;
+use crate::helpers::parse_php_file;
 use crate::{
     environment::Environment,
     helpers::get_variable_span,
@@ -40,16 +40,21 @@ pub struct Evaluator {
     pub env: Environment,
 
     pub warnings: Vec<PhpError>,
+
+    pub included_files: Vec<String>,
+    pub required_files: Vec<String>,
 }
 
 impl Evaluator {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Evaluator {
+        Evaluator {
             output: String::new(),
             php_open: false,
             die: false,
             env: Environment::new(),
             warnings: vec![],
+            included_files: vec![],
+            required_files: vec![],
         }
     }
 
@@ -63,6 +68,8 @@ impl Evaluator {
             die: false,
             env: self.env.clone(),
             warnings: vec![],
+            included_files: vec![],
+            required_files: vec![],
         }
     }
 
@@ -83,7 +90,15 @@ impl Evaluator {
 
                 Ok(NULL)
             }
-            Statement::Expression(e) => self.eval_expression(e.expression),
+            Statement::Expression(e) => {
+                let expression_result = self.eval_expression(e.expression);
+
+                if expression_result.is_err() {
+                    return Err(expression_result.unwrap_err());
+                }
+
+                Ok(NULL)
+            }
             Statement::Echo(echo) => {
                 for expr in echo.values {
                     let expression_result = self.eval_expression(expr)?;
@@ -397,7 +412,7 @@ impl Evaluator {
                         let right_var_name = self.get_variable_name(right_var)?;
 
                         if !self.env.var_exists(&right_var_name) {
-                            self.env.set(&right_var_name, NULL)
+                            self.env.set_var(&right_var_name, NULL)
                         }
 
                         let cloned_env = self.env.clone();
@@ -413,7 +428,7 @@ impl Evaluator {
                         let right_value_clone = right_value.clone();
 
                         if !self.env.var_exists(&left_var_name) {
-                            self.env.set(&left_var_name, right_value_clone);
+                            self.env.set_var(&left_var_name, right_value_clone);
                         } else {
                             let old_value = self.env.get_var_with_rc(&left_var_name).unwrap();
 
@@ -727,49 +742,16 @@ impl Evaluator {
             },
             Expression::Variable(var) => self.get_var(var),
             Expression::Include(include) => {
-                let path = self.eval_expression(*include.path)?;
-
-                let path_as_string = path.to_string();
-
-                if path_as_string.is_none() {
-                    self.warnings.push(PhpError {
-                        level: ErrorLevel::Warning,
-                        message: format!("{} to string conversion failed", path.get_type(),),
-                        line: include.include.line,
-                    });
-                }
-
-                let real_path = path_as_string.unwrap_or("".to_string());
-
-                if real_path.is_empty() {
-                    let error = format!("Path cannot be empty");
-
-                    return Err(PhpError {
-                        level: ErrorLevel::Fatal,
-                        message: error,
-                        line: include.include.line,
-                    });
-                }
-
-                let content = fs::read_to_string(real_path.clone());
-
-                if content.is_err() {
-                    let warning = PhpError {
-                        level: ErrorLevel::Warning,
-                        message: format!(
-                            "include({}): Failed to open stream: {}",
-                            real_path,
-                            content.unwrap_err()
-                        ),
-                        line: include.include.line,
-                    };
-
-                    self.warnings.push(warning);
-
-                    return Ok(NULL);
-                }
-
-                include_php_file(self, &real_path, &content.unwrap())
+                self.handle_include(*include.path, false, include.include)
+            }
+            Expression::IncludeOnce(include) => {
+                self.handle_include(*include.path, true, include.include_once)
+            }
+            Expression::Require(require) => {
+                self.handle_require(*require.path, false, require.require)
+            }
+            Expression::RequireOnce(require) => {
+                self.handle_require(*require.path, true, require.require_once)
             }
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
@@ -966,7 +948,7 @@ impl Evaluator {
         let new_value_clone = new_value.clone();
 
         if !self.env.var_exists(&var_name) {
-            self.env.set(&var_name, new_value_clone);
+            self.env.set_var(&var_name, new_value_clone);
         } else {
             let old_value = self.env.get_var_with_rc(&var_name).unwrap();
 
@@ -1008,5 +990,125 @@ impl Evaluator {
             ErrorLevel::ParseError => Err(error),
             ErrorLevel::Raw => Err(error),
         }
+    }
+
+    fn handle_include(
+        &mut self,
+        path: Expression,
+        once: bool,
+        span: Span,
+    ) -> Result<PhpValue, PhpError> {
+        let path = self.eval_expression(path)?;
+
+        let path_as_string = path.to_string();
+
+        if path_as_string.is_none() {
+            self.warnings.push(PhpError {
+                level: ErrorLevel::Warning,
+                message: format!("{} to string conversion failed", path.get_type(),),
+                line: span.line,
+            });
+        }
+
+        let real_path = path_as_string.unwrap_or("".to_string());
+
+        if real_path.is_empty() {
+            let error = format!("Path cannot be empty");
+
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: error,
+                line: span.line,
+            });
+        }
+
+        if once && self.included_files.iter().any(|i| *i == real_path) {
+            return Ok(PhpValue::Bool(true));
+        }
+
+        let content = fs::read_to_string(real_path.clone());
+
+        if content.is_err() {
+            let fn_name = if once { "include_once" } else { "include" };
+
+            let warning = PhpError {
+                level: ErrorLevel::Warning,
+                message: format!(
+                    "{}({}): Failed to open stream: {}",
+                    fn_name,
+                    real_path,
+                    content.unwrap_err()
+                ),
+                line: span.line,
+            };
+
+            self.warnings.push(warning);
+
+            return Ok(NULL);
+        }
+
+        self.included_files.push(real_path.clone());
+
+        parse_php_file(self, &real_path, &content.unwrap())
+    }
+
+    fn handle_require(
+        &mut self,
+        path: Expression,
+        once: bool,
+        span: Span,
+    ) -> Result<PhpValue, PhpError> {
+        let path = self.eval_expression(path)?;
+
+        let path_as_string = path.to_string();
+
+        if path_as_string.is_none() {
+            self.warnings.push(PhpError {
+                level: ErrorLevel::Warning,
+                message: format!("{} to string conversion failed", path.get_type(),),
+                line: span.line,
+            });
+        }
+
+        let real_path = path_as_string.unwrap_or("".to_string());
+
+        if real_path.is_empty() {
+            let error = format!("Path cannot be empty");
+
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: error,
+                line: span.line,
+            });
+        }
+
+        if once && self.required_files.iter().any(|i| *i == real_path) {
+            return Ok(PhpValue::Bool(true));
+        }
+
+        let content = fs::read_to_string(real_path.clone());
+
+        if content.is_err() {
+            let fn_name = if once { "require_once" } else { "require" };
+
+            let error = PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "{}({}): Failed to open stream: {}",
+                    fn_name,
+                    real_path,
+                    content.unwrap_err()
+                ),
+                line: span.line,
+            };
+
+            self.warnings.push(error);
+
+            return Ok(NULL);
+        }
+
+        self.required_files.push(real_path.clone());
+
+        parse_php_file(self, &real_path, &content.unwrap())
     }
 }

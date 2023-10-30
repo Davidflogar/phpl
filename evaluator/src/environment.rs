@@ -5,14 +5,14 @@ use crate::php_value::PhpValue;
 #[derive(Clone)]
 pub struct Environment {
     vars: HashMap<String, Rc<RefCell<PhpValue>>>,
-	identifiers: HashMap<String, PhpValue>,
+    identifiers: HashMap<String, PhpValue>,
 }
 
 impl Environment {
     pub fn new() -> Environment {
         Environment {
             vars: HashMap::new(),
-			identifiers: HashMap::new(),
+            identifiers: HashMap::new(),
         }
     }
 
@@ -20,7 +20,7 @@ impl Environment {
         self.vars.remove(key);
     }
 
-    pub fn set(&mut self, key: &str, value: PhpValue) {
+    pub fn set_var(&mut self, key: &str, value: PhpValue) {
         self.vars
             .insert(key.to_string(), Rc::new(RefCell::new(value)));
     }
@@ -52,19 +52,18 @@ impl Environment {
         self.vars.get(key)
     }
 
-	pub fn get_identifier(&self, key: &str) -> Option<PhpValue> {
-		self.identifiers.get(key).cloned()
-	}
+    pub fn get_identifier(&self, key: &str) -> Option<PhpValue> {
+        self.identifiers.get(key).cloned()
+    }
 
-	/// Merges differences from another environment, adding missing values.
-	pub fn get_and_set_diff(&mut self, other_env: Environment) {
-		for (key, value) in other_env.vars {
-			self.vars.entry(key).or_insert(value);
-		}
+    /// Merges differences from another environment, adding missing values.
+    pub fn get_and_set_diff(&mut self, other_env: Environment) {
+        for (key, value) in other_env.vars {
+            self.vars.entry(key).or_insert(value);
+        }
 
-		for (key, value) in other_env.identifiers {
-			self.identifiers.insert(key, value);
-		}
-
-	}
+        for (key, value) in other_env.identifiers {
+            self.identifiers.insert(key, value);
+        }
+    }
 }

@@ -18,8 +18,8 @@ pub fn get_variable_span(var: Variable) -> Span {
     }
 }
 
-/// Includes a file, this function is used with "include".
-pub fn include_php_file(
+/// Parses a PHP file and returns the result, this function is used with "require" and "include".
+pub fn parse_php_file(
     evaluator: &mut Evaluator,
     input: &str,
     content: &str,
@@ -68,6 +68,10 @@ pub fn include_php_file(
 
             // copy the environment
             evaluator.env.get_and_set_diff(child_evalutor.env);
+
+			if last_result.is_null() {
+				last_result = PhpValue::Bool(true);
+			}
 
             Ok(last_result)
         }
