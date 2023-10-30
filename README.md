@@ -15,7 +15,7 @@ These are all the statements/expressions currently supported:
 - [x] FullOpeningTag
 - [x] ShortOpeningTag
 - [x] EchoOpeningTag
-- [ ] ClosingTag
+- [x] ClosingTag
 - [x] InlineHtml
 - [ ] Label
 - [ ] Goto
@@ -53,10 +53,10 @@ These are all the statements/expressions currently supported:
 	- [x] Instanceof
 	- [x] Reference
 	- [x] Parenthesized
-	- [ ] ErrorSuppress
-	- [ ] Identifier
+	- [x] ErrorSuppress
+	- [x] Identifier
 	- [x] Variable
-	- [ ] Include
+	- [x] Include
 	- [ ] IncludeOnce
 	- [ ] Require
 	- [ ] RequireOnce
