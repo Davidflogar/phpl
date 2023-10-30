@@ -57,9 +57,9 @@ These are all the statements/expressions currently supported:
 	- [x] Identifier
 	- [x] Variable
 	- [x] Include
-	- [ ] IncludeOnce
-	- [ ] Require
-	- [ ] RequireOnce
+	- [x] IncludeOnce
+	- [x] Require
+	- [x] RequireOnce
 	- [ ] FunctionCall
 	- [ ] FunctionClosureCreation
 	- [ ] MethodCall
