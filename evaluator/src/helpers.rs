@@ -1,6 +1,14 @@
-use php_parser_rs::{lexer::token::Span, parser::{ast::variables::Variable, self}};
+use core::panic;
 
-use crate::evaluator::Evaluator;
+use php_parser_rs::{
+    lexer::token::Span,
+    parser::{self, ast::variables::Variable},
+};
+
+use crate::{
+    evaluator::Evaluator,
+    php_value::{PhpError, PhpValue},
+};
 
 pub fn get_variable_span(var: Variable) -> Span {
     match var {
@@ -10,28 +18,71 @@ pub fn get_variable_span(var: Variable) -> Span {
     }
 }
 
-/// Includes a file, this function is used with "require" and "include".
-pub fn include_php_file(input: &str, content: &str) {
+/// Includes a file, this function is used with "include".
+pub fn include_php_file(
+    evaluator: &mut Evaluator,
+    input: &str,
+    content: &str,
+) -> Result<PhpValue, PhpError> {
     match parser::parse(content) {
         Ok(ast) => {
-            let mut evaluator = Evaluator::new();
+            let mut child_evalutor = evaluator.new_child();
+
+            let mut last_result = PhpValue::Null;
 
             for node in ast {
-                evaluator.eval_statement(node);
+                let result = child_evalutor.eval_statement(node);
 
-                if evaluator.die {
+                if child_evalutor.die || result.is_err() {
+                    if result.is_err() {
+                        evaluator.output = format!(
+                            "PHP Fatal Error: {}",
+                            result.unwrap_err().get_message(input)
+                        );
+                    }
+
                     break;
                 }
+
+                last_result = result.unwrap();
             }
 
-            for warning in evaluator.warnings {
-                println!("{}: {}", input, warning.message);
+            for warning in child_evalutor.warnings {
+                // Note that here, although the error is a warning,
+                // it is converted to an ErrorLevel::Raw so that
+                // the error is not modified when calling get_message() twice on the same error.
+
+                let new_warning = PhpError {
+                    level: crate::php_value::ErrorLevel::Raw,
+                    message: format!(
+                        "PHP Warning: {} in {} on line {}",
+                        warning.message, input, warning.line
+                    ),
+                    line: 0,
+                };
+
+                evaluator.warnings.push(new_warning);
             }
 
-            print!("{}", evaluator.output);
+            evaluator.output += &child_evalutor.output;
+
+            // copy the environment
+            evaluator.env.get_and_set_diff(child_evalutor.env);
+
+            Ok(last_result)
         }
         Err(err) => {
-            println!("{}", err.report(&content, Some(input), true, false).unwrap());
+            let err = err.report(&content, Some(input), false, false);
+
+            if err.is_err() {
+                panic!("{}", err.unwrap_err());
+            }
+
+            Err(PhpError {
+                level: crate::php_value::ErrorLevel::Raw,
+                message: format!("PHP Parse Error in {}: {}", input, err.unwrap()),
+                line: 0,
+            })
         }
     }
 }

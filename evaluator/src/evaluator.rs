@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::str;
+use std::{fs, str};
 
 use php_parser_rs::parser::ast::identifiers::Identifier;
 use php_parser_rs::parser::ast::operators::{
@@ -37,7 +37,7 @@ pub struct Evaluator {
     pub die: bool,
 
     /// The environment of the code
-    env: Environment,
+    pub env: Environment,
 
     pub warnings: Vec<PhpError>,
 }
@@ -53,7 +53,20 @@ impl Evaluator {
         }
     }
 
-    pub fn eval_statement(&mut self, node: Statement) -> Result<PhpValue, String> {
+    /// Returns a new child evaluator based on the current evaluator.
+    ///
+    /// This is only used with include and require statements.
+    pub fn new_child(&self) -> Evaluator {
+        Evaluator {
+            output: String::new(),
+            php_open: false,
+            die: false,
+            env: self.env.clone(),
+            warnings: vec![],
+        }
+    }
+
+    pub fn eval_statement(&mut self, node: Statement) -> Result<PhpValue, PhpError> {
         match node {
             Statement::FullOpeningTag(_) => {
                 self.php_open = true;
@@ -81,9 +94,10 @@ impl Evaluator {
                         self.warnings.push(PhpError {
                             level: ErrorLevel::Warning,
                             message: format!(
-                                "PHP Warning: {} to string conversion failed.",
+                                "{} to string conversion failed.",
                                 expression_result.clone().get_type()
                             ),
+                            line: echo.echo.line,
                         });
 
                         self.output += expression_result.get_type().as_str();
@@ -101,21 +115,18 @@ impl Evaluator {
         }
     }
 
-    fn eval_expression(&mut self, expr: Expression) -> Result<PhpValue, String> {
+    fn eval_expression(&mut self, expr: Expression) -> Result<PhpValue, PhpError> {
         match expr {
             Expression::Eval(_) => todo!(),
             Expression::Empty(ee) => {
                 let arg = ee.argument.argument;
 
                 match arg {
-                    Argument::Named(na) => {
-                        let error = format!(
-                            "Named arguments are not supported in empty(): line {}",
-                            na.colon.line
-                        );
-
-                        Err(error)
-                    }
+                    Argument::Named(na) => Err(PhpError {
+                        level: ErrorLevel::ParseError,
+                        message: "Named arguments are not supported in empty()".to_string(),
+                        line: na.colon.line,
+                    }),
 
                     Argument::Positional(pa) => {
                         let arg_as_php_value = self.eval_expression(pa.value)?;
@@ -154,12 +165,11 @@ impl Evaluator {
                 for arg in args {
                     match arg {
                         Argument::Named(na) => {
-                            let error = format!(
-                                "Named arguments are not supported in isset(): line {}",
-                                na.colon.line
-                            );
-
-                            return Err(error);
+                            return Err(PhpError {
+                                level: ErrorLevel::ParseError,
+                                message: "Named arguments are not supported in isset()".to_string(),
+                                line: na.colon.line,
+                            });
                         }
                         Argument::Positional(pa) => {
                             let arg_as_php_value = self.eval_expression(pa.value)?;
@@ -188,13 +198,11 @@ impl Evaluator {
                 for arg in args {
                     match arg {
                         Argument::Named(arg) => {
-                            let error = format!(
-                                "Named arguments are not supported in unset(): line {}",
-                                arg.colon.line
-                            )
-                            .to_string();
-
-                            return Err(error);
+                            return Err(PhpError {
+                                level: ErrorLevel::ParseError,
+                                message: "Named arguments are not supported in unset()".to_string(),
+                                line: arg.colon.line,
+                            });
                         }
                         Argument::Positional(pa) => {
                             if let Expression::Variable(va) = pa.value {
@@ -203,12 +211,11 @@ impl Evaluator {
                                 // delete the variable from the environment
                                 self.env.delete_var(var_name.as_str());
                             } else {
-                                let error = format!(
-                                    "Only variables can be unset: got {:#?}",
-                                    self.eval_expression(pa.value)
-                                );
-
-                                return Err(error);
+                                return Err(PhpError {
+                                    level: ErrorLevel::ParseError,
+                                    message: "Only variables can be unset".to_string(),
+                                    line: ue.unset.line,
+                                });
                             }
                         }
                     }
@@ -226,9 +233,10 @@ impl Evaluator {
                         self.warnings.push(PhpError {
                             level: ErrorLevel::Warning,
                             message: format!(
-                                "PHP Warning: {} to string conversion failed.",
+                                "{} to string conversion failed.",
                                 value.clone().get_type()
                             ),
+                            line: pe.print.line,
                         });
 
                         return Ok(PhpValue::String(value.get_type()));
@@ -248,9 +256,10 @@ impl Evaluator {
                                 self.warnings.push(PhpError {
                                     level: ErrorLevel::Warning,
                                     message: format!(
-                                        "PHP Warning: {} to string conversion failed.",
+                                        "{} to string conversion failed.",
                                         value.clone().get_type()
                                     ),
+                                    line: pe.print.line,
                                 });
 
                                 return Ok(PhpValue::String(value.get_type()));
@@ -259,12 +268,12 @@ impl Evaluator {
                             self.output += value_as_string.unwrap().as_str();
                         }
                         _ => {
-                            let error = format!(
-                                "Only positional arguments are supported in print(): line {}",
-                                arg.left_parenthesis.line
-                            );
-
-                            return Err(error);
+                            return Err(PhpError {
+                                level: ErrorLevel::ParseError,
+                                message: "Only positional arguments are supported in print()"
+                                    .to_string(),
+                                line: pe.print.line,
+                            });
                         }
                     }
                 }
@@ -293,79 +302,71 @@ impl Evaluator {
                 }
             },
             Expression::ArithmeticOperation(operation) => match operation {
-                ArithmeticOperationExpression::Addition { left, plus, right } => {
+                ArithmeticOperationExpression::Addition { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(plus, left_value + right_value)
+                    self.php_value_or_die(left_value + right_value)
                 }
-                ArithmeticOperationExpression::Subtraction { left, minus, right } => {
+                ArithmeticOperationExpression::Subtraction { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(minus, left_value - right_value)
+                    self.php_value_or_die(left_value - right_value)
                 }
-                ArithmeticOperationExpression::Multiplication {
-                    left,
-                    asterisk,
-                    right,
-                } => {
+                ArithmeticOperationExpression::Multiplication { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(asterisk, left_value * right_value)
+                    self.php_value_or_die(left_value * right_value)
                 }
-                ArithmeticOperationExpression::Division { left, slash, right } => {
+                ArithmeticOperationExpression::Division { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(slash, left_value / right_value)
+                    self.php_value_or_die(left_value / right_value)
                 }
-                ArithmeticOperationExpression::Modulo {
-                    left,
-                    percent,
-                    right,
-                } => {
+                ArithmeticOperationExpression::Modulo { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(percent, left_value % right_value)
+                    self.php_value_or_die(left_value % right_value)
                 }
-                ArithmeticOperationExpression::Exponentiation { left, pow, right } => {
+                ArithmeticOperationExpression::Exponentiation { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(pow, left_value.pow(right_value))
+                    self.php_value_or_die(left_value.pow(right_value))
                 }
-                ArithmeticOperationExpression::Negative { minus, right } => {
+                ArithmeticOperationExpression::Negative { right, .. } => {
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(minus, right_value * PhpValue::Int(-1))
+                    self.php_value_or_die(right_value * PhpValue::Int(-1))
                 }
-                ArithmeticOperationExpression::Positive { plus, right } => {
+                ArithmeticOperationExpression::Positive { right, .. } => {
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(plus, right_value * PhpValue::Int(1))
+                    self.php_value_or_die(right_value * PhpValue::Int(1))
                 }
-                ArithmeticOperationExpression::PreIncrement { increment, right } => {
+                ArithmeticOperationExpression::PreIncrement { right, .. } => {
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(increment, PhpValue::Int(1) + right_value)
+                    self.php_value_or_die(PhpValue::Int(1) + right_value)
                 }
-                ArithmeticOperationExpression::PostIncrement { increment, left } => {
+                ArithmeticOperationExpression::PostIncrement { left, .. } => {
                     let left_value = self.eval_expression(*left)?;
 
-                    self.php_value_or_die(increment, left_value + PhpValue::Int(1))
+                    self.php_value_or_die(left_value + PhpValue::Int(1))
                 }
-                ArithmeticOperationExpression::PreDecrement { decrement, right } => {
+                ArithmeticOperationExpression::PreDecrement { right, .. } => {
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(decrement, right_value - PhpValue::Int(1))
+                    self.php_value_or_die(right_value - PhpValue::Int(1))
                 }
-                ArithmeticOperationExpression::PostDecrement { decrement, left } => {
+                ArithmeticOperationExpression::PostDecrement { left, .. } => {
                     let left_value = self.eval_expression(*left)?;
 
-                    self.php_value_or_die(decrement, left_value - PhpValue::Int(1))
+                    self.php_value_or_die(left_value - PhpValue::Int(1))
                 }
             },
             Expression::AssignmentOperation(operation) => match operation {
@@ -375,26 +376,22 @@ impl Evaluator {
                     right,
                 } => {
                     let Expression::Variable(left_var) = *left else {
-						let error = format!(
-							"Only variables can be assigned: got {} on line {}",
-							self.eval_expression(*left)?.get_type(),
-							equals.line,
-						);
-
-						return Err(error);
+						return Err(PhpError {
+							level: ErrorLevel::ParseError,
+							message: "Only variables can be assigned".to_string(),
+							line: equals.line
+						});
 					};
 
                     let left_var_name = self.get_variable_name(left_var)?;
 
                     if let Expression::Reference(reference) = *right {
                         let Expression::Variable(right_var) = *reference.right else {
-							let error = format!(
-								"References must be to variables: got {} on line {}",
-								self.eval_expression(*reference.right)?.get_type(),
-								reference.ampersand.line
-							);
-
-							return Err(error);
+							return Err(PhpError {
+								level: ErrorLevel::ParseError,
+								message: "References must be to variables".to_string(),
+								line: reference.ampersand.line
+							});
 						};
 
                         let right_var_name = self.get_variable_name(right_var)?;
@@ -493,48 +490,40 @@ impl Evaluator {
                 } => self.change_var_value(*left, coalesce_equals, *right, "??"),
             },
             Expression::BitwiseOperation(operation) => match operation {
-                BitwiseOperationExpression::And { left, and, right } => {
+                BitwiseOperationExpression::And { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(and, left_value & right_value)
+                    self.php_value_or_die(left_value & right_value)
                 }
-                BitwiseOperationExpression::Or { left, or, right } => {
+                BitwiseOperationExpression::Or { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(or, left_value | right_value)
+                    self.php_value_or_die(left_value | right_value)
                 }
-                BitwiseOperationExpression::Xor { left, xor, right } => {
+                BitwiseOperationExpression::Xor { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(xor, left_value ^ right_value)
+                    self.php_value_or_die(left_value ^ right_value)
                 }
-                BitwiseOperationExpression::LeftShift {
-                    left,
-                    left_shift,
-                    right,
-                } => {
+                BitwiseOperationExpression::LeftShift { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(left_shift, left_value << right_value)
+                    self.php_value_or_die(left_value << right_value)
                 }
-                BitwiseOperationExpression::RightShift {
-                    left,
-                    right_shift,
-                    right,
-                } => {
+                BitwiseOperationExpression::RightShift { left, right, .. } => {
                     let left_value = self.eval_expression(*left)?;
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(right_shift, left_value >> right_value)
+                    self.php_value_or_die(left_value >> right_value)
                 }
-                BitwiseOperationExpression::Not { not, right } => {
+                BitwiseOperationExpression::Not { right, .. } => {
                     let right_value = self.eval_expression(*right)?;
 
-                    self.php_value_or_die(not, !right_value)
+                    self.php_value_or_die(!right_value)
                 }
             },
             Expression::ComparisonOperation(operation) => match operation {
@@ -577,8 +566,8 @@ impl Evaluator {
                     Ok(PhpValue::Bool(left_value != right_value))
                 }
                 ComparisonOperationExpression::LessThan { left, right, .. } => {
-                    let left_value = self.eval_expression(*left);
-                    let right_value = self.eval_expression(*right);
+                    let left_value = self.eval_expression(*left)?;
+                    let right_value = self.eval_expression(*right)?;
 
                     Ok(PhpValue::Bool(left_value < right_value))
                 }
@@ -662,14 +651,14 @@ impl Evaluator {
                 let left_value = self.eval_expression(*expression.left)?;
                 let right_value = self.eval_expression(*expression.right)?;
 
-                self.php_value_or_die(expression.dot, left_value.concat(right_value))
+                self.php_value_or_die(left_value.concat(right_value))
             }
             Expression::Instanceof(instanceof) => {
                 let Expression::Variable(left_expr) = *instanceof.left else {
                     let error =
                         "Left side of instanceof must be a variable".to_string();
 
-                    return Err(error);
+                    return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: instanceof.instanceof.line });
 				};
 
                 let left_expr_value = self.get_variable_value(left_expr)?;
@@ -681,7 +670,7 @@ impl Evaluator {
 							left_expr_value.get_type()
 						);
 
-					return Err(error);
+					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: instanceof.instanceof.line });
 				};
 
                 let right_expr_value = self.eval_expression(*instanceof.right)?;
@@ -694,12 +683,13 @@ impl Evaluator {
                 }
             }
             Expression::Reference(reference) => {
-                let error = format!(
-                    "Unexpected reference expression on line {}",
-                    reference.ampersand.line
-                );
+                let error = format!("Unexpected reference expression",);
 
-                Err(error)
+                Err(PhpError {
+                    level: ErrorLevel::ParseError,
+                    message: error,
+                    line: reference.ampersand.line,
+                })
             }
             Expression::Parenthesized(parenthesized) => self.eval_expression(*parenthesized.expr),
             Expression::ErrorSuppress(error_expression) => {
@@ -724,12 +714,13 @@ impl Evaluator {
                     if expr.is_some() {
                         Ok(expr.unwrap())
                     } else {
-                        let error = format!(
-                            "Identifier {} not found on line {}",
-                            identifier_name, simple_identifier.span.line
-                        );
+                        let error = format!("Identifier {} not found", identifier_name,);
 
-                        Err(error)
+                        Err(PhpError {
+                            level: ErrorLevel::Fatal,
+                            message: error,
+                            line: simple_identifier.span.line,
+                        })
                     }
                 }
                 _ => todo!(),
@@ -743,23 +734,42 @@ impl Evaluator {
                 if path_as_string.is_none() {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!(
-                            "PHP Warning: {} to string conversion failed, on line {}",
-                            path.get_type(),
-                            include.include.line
-                        ),
+                        message: format!("{} to string conversion failed", path.get_type(),),
+                        line: include.include.line,
                     });
                 }
 
-                let real_path = path_as_string.unwrap();
+                let real_path = path_as_string.unwrap_or("".to_string());
 
                 if real_path.is_empty() {
-                    let error = format!("Path cannot be empty on line {}", include.include.line);
+                    let error = format!("Path cannot be empty");
 
-                    return Err(error);
+                    return Err(PhpError {
+                        level: ErrorLevel::Fatal,
+                        message: error,
+                        line: include.include.line,
+                    });
                 }
 
-                Ok(NULL)
+                let content = fs::read_to_string(real_path.clone());
+
+                if content.is_err() {
+                    let warning = PhpError {
+                        level: ErrorLevel::Warning,
+                        message: format!(
+                            "include({}): Failed to open stream: {}",
+                            real_path,
+                            content.unwrap_err()
+                        ),
+                        line: include.include.line,
+                    };
+
+                    self.warnings.push(warning);
+
+                    return Ok(NULL);
+                }
+
+                include_php_file(self, &real_path, &content.unwrap())
             }
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
@@ -776,20 +786,15 @@ impl Evaluator {
 
     fn php_value_or_die(
         &mut self,
-        span: Span,
         value: Result<PhpValue, PhpError>,
-    ) -> Result<PhpValue, String> {
+    ) -> Result<PhpValue, PhpError> {
         match value {
             Ok(value) => Ok(value),
-            Err(error) => {
-                let error = format!("{} on line {}", error.message, span.line);
-
-                Err(error)
-            }
+            Err(error) => Err(error),
         }
     }
 
-    fn get_variable_name(&mut self, variable: Variable) -> Result<String, String> {
+    fn get_variable_name(&mut self, variable: Variable) -> Result<String, PhpError> {
         match variable {
             Variable::SimpleVariable(sv) => Ok(sv.name.to_string()),
             Variable::VariableVariable(vv) => {
@@ -799,12 +804,15 @@ impl Evaluator {
                     Ok(value)
                 } else {
                     let error = format!(
-                        "Variable variable must be a string, got {}, on line {}",
+                        "Variable variable must be a string, got {}",
                         value.get_type(),
-                        vv.span.line
                     );
 
-                    Err(error)
+                    Err(PhpError {
+                        level: ErrorLevel::Fatal,
+                        message: error,
+                        line: vv.span.line,
+                    })
                 }
             }
             Variable::BracedVariableVariable(bvv) => {
@@ -815,19 +823,14 @@ impl Evaluator {
                 if expr_as_string.is_none() {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!(
-                            "PHP Warning: {} to string conversion failed, on line {}",
-                            expr_value.get_type(),
-                            bvv.start.line
-                        ),
+                        message: format!("{} to string conversion failed", expr_value.get_type(),),
+                        line: bvv.start.line,
                     });
 
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!(
-                            "PHP Warning: Undefined variable $ on line {}",
-                            bvv.start.line
-                        ),
+                        message: format!("Undefined variable $ on line {}", bvv.start.line),
+                        line: bvv.start.line,
                     });
 
                     return Ok("".to_string());
@@ -840,7 +843,7 @@ impl Evaluator {
         }
     }
 
-    fn get_variable_value(&mut self, variable: Variable) -> Result<PhpValue, String> {
+    fn get_variable_value(&mut self, variable: Variable) -> Result<PhpValue, PhpError> {
         match variable {
             Variable::SimpleVariable(sv) => {
                 let var_name = sv.name.to_string();
@@ -850,14 +853,13 @@ impl Evaluator {
                 if value.is_some() {
                     Ok(value.unwrap())
                 } else {
-                    let warning = format!(
-                        "PHP Warning: Undefined variable {} on line {}",
-                        var_name, sv.span.line
-                    );
+                    let warning =
+                        format!("Undefined variable {} on line {}", var_name, sv.span.line);
 
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
                         message: warning,
+                        line: sv.span.line,
                     });
 
                     Ok(NULL)
@@ -873,18 +875,16 @@ impl Evaluator {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
                         message: format!(
-                            "PHP Warning: Braced variable variable must be a string, got {}, on line {}",
+                            "Braced variable variable must be a string, got {}",
                             expr_value.get_type(),
-                            bvv.start.line
                         ),
+                        line: bvv.start.line,
                     });
 
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!(
-                            "PHP Warning: Undefined variable $ on line {}",
-                            bvv.start.line
-                        ),
+                        message: "Undefined variable $".to_string(),
+                        line: bvv.start.line,
                     });
 
                     return Ok(NULL);
@@ -895,10 +895,8 @@ impl Evaluator {
                 if !self.env.var_exists(&variable_name) {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!(
-                            "PHP Warning: Undefined variable $ on line {}",
-                            bvv.start.line
-                        ),
+                        message: format!("Undefined variable $ on line {}", bvv.start.line),
+                        line: bvv.start.line,
                     });
 
                     return Ok(NULL);
@@ -915,17 +913,15 @@ impl Evaluator {
         span: Span,
         right: Expression,
         operation: &str,
-    ) -> Result<PhpValue, String> {
+    ) -> Result<PhpValue, PhpError> {
         let right_value = self.eval_expression(right)?;
 
         let Expression::Variable(var) = left else {
-            let error = format!(
-                "Only variables can be assigned: got {} on line {}",
-                self.eval_expression(left)?.get_type(),
-                span.line,
-            );
-
-            return Err(error);
+            return Err(PhpError {
+				level: ErrorLevel::ParseError,
+				message: "Only variables can be assigned".to_string(),
+				line: span.line,
+			});
         };
 
         let var_name = self.get_variable_name(var)?;
@@ -933,29 +929,30 @@ impl Evaluator {
         let current_var_value = self.env.get_var(&var_name);
 
         if current_var_value.is_none() {
-            let error = format!(
-                "PHP Warning: Undefined variable {} on line {}",
-                var_name, span.line
-            );
+            let error = format!("Undefined variable {}", var_name);
 
-            return Err(error);
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: error,
+                line: span.line,
+            });
         }
 
         let current_var_value = current_var_value.unwrap();
 
         let new_value = match operation {
-            "+" => self.php_value_or_die(span, current_var_value + right_value),
-            "-" => self.php_value_or_die(span, current_var_value - right_value),
-            "*" => self.php_value_or_die(span, current_var_value * right_value),
-            "/" => self.php_value_or_die(span, current_var_value / right_value),
-            "%" => self.php_value_or_die(span, current_var_value % right_value),
-            "**" => self.php_value_or_die(span, current_var_value.pow(right_value)),
-            "." => self.php_value_or_die(span, current_var_value.concat(right_value)),
-            "&" => self.php_value_or_die(span, current_var_value & right_value),
-            "|" => self.php_value_or_die(span, current_var_value | right_value),
-            "^" => self.php_value_or_die(span, current_var_value ^ right_value),
-            "<<" => self.php_value_or_die(span, current_var_value << right_value),
-            ">>" => self.php_value_or_die(span, current_var_value >> right_value),
+            "+" => self.php_value_or_die(current_var_value + right_value),
+            "-" => self.php_value_or_die(current_var_value - right_value),
+            "*" => self.php_value_or_die(current_var_value * right_value),
+            "/" => self.php_value_or_die(current_var_value / right_value),
+            "%" => self.php_value_or_die(current_var_value % right_value),
+            "**" => self.php_value_or_die(current_var_value.pow(right_value)),
+            "." => self.php_value_or_die(current_var_value.concat(right_value)),
+            "&" => self.php_value_or_die(current_var_value & right_value),
+            "|" => self.php_value_or_die(current_var_value | right_value),
+            "^" => self.php_value_or_die(current_var_value ^ right_value),
+            "<<" => self.php_value_or_die(current_var_value << right_value),
+            ">>" => self.php_value_or_die(current_var_value >> right_value),
             "??" => {
                 if current_var_value.is_null() {
                     Ok(right_value)
@@ -980,7 +977,7 @@ impl Evaluator {
     }
 
     /// Returns the value of the variable. If it does not exist, the warning is added and Null is returned.
-    fn get_var(&mut self, variable: Variable) -> Result<PhpValue, String> {
+    fn get_var(&mut self, variable: Variable) -> Result<PhpValue, PhpError> {
         let var_name = self.get_variable_name(variable.clone())?;
 
         let value = self.env.get_var(&var_name);
@@ -988,29 +985,28 @@ impl Evaluator {
         if value.is_some() {
             Ok(value.unwrap())
         } else {
-            let warning = format!(
-                "PHP Warning: Undefined variable {} on line {}\n",
-                var_name,
-                get_variable_span(variable).line
-            );
+            let warning = format!("Undefined variable {}", var_name,);
 
             self.warnings.push(PhpError {
                 level: ErrorLevel::Warning,
                 message: warning,
+                line: get_variable_span(variable).line,
             });
 
             Ok(NULL)
         }
     }
 
-    fn eval_error(&mut self, error: PhpError) -> Result<PhpValue, String> {
+    fn eval_error(&mut self, error: PhpError) -> Result<PhpValue, PhpError> {
         match error.level {
-            ErrorLevel::Fatal => Err(error.message),
+            ErrorLevel::Fatal => Err(error),
             ErrorLevel::Warning => {
                 self.warnings.push(error);
 
                 Ok(NULL)
             }
+            ErrorLevel::ParseError => Err(error),
+            ErrorLevel::Raw => Err(error),
         }
     }
 }

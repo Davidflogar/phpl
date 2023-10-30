@@ -32,12 +32,17 @@ pub enum PhpValue {
 pub struct PhpError {
     pub level: ErrorLevel,
     pub message: String,
+	pub line: usize,
 }
 
 #[derive(Debug, Clone)]
 pub enum ErrorLevel {
     Fatal,
     Warning,
+	ParseError,
+
+	/// A Raw error should not be formatted with get_message()
+	Raw,
     /*	Notice,
     UserError,
     UserWarning,
@@ -106,6 +111,7 @@ impl PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -140,6 +146,7 @@ impl PhpValue {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: error_message,
+				line: 0,
             });
         }
 
@@ -195,6 +202,7 @@ impl Add for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -223,6 +231,7 @@ impl Sub for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -251,6 +260,7 @@ impl Mul for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -279,6 +289,7 @@ impl Div for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -307,6 +318,7 @@ impl Rem for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -340,6 +352,7 @@ impl BitAnd for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -373,6 +386,7 @@ impl BitOr for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -406,6 +420,7 @@ impl BitXor for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -439,6 +454,7 @@ impl Shl for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -472,6 +488,7 @@ impl Shr for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -492,6 +509,7 @@ impl Not for PhpValue {
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: error_message,
+					line: 0,
                 })
             }
         }
@@ -546,10 +564,6 @@ impl PartialOrd for PhpValue {
     }
 }
 
-/*
- * PhpObject
-*/
-
 impl PhpObject {
     pub fn is_instance_of(self, object: PhpValue) -> Result<bool, PhpError> {
         if let PhpValue::Object(object) = object {
@@ -566,7 +580,35 @@ impl PhpObject {
             Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: "Right side of instanceof must be an object".to_string(),
+				line: 0,
             })
         }
     }
+}
+
+impl PhpError {
+	pub fn get_message(self, input: &str) -> String {
+		if let ErrorLevel::Raw = self.level {
+			return self.message;
+		}
+
+		let level_error = match self.level {
+			ErrorLevel::Fatal => "Fatal error".to_string(),
+			ErrorLevel::Warning => "Warning".to_string(),
+			ErrorLevel::ParseError => "Parse error".to_string(),
+			_ => "".to_string(),
+		};
+
+		format!("PHP {}: {} in {} on line {}", level_error, self.message, input, self.line)
+	}
+}
+
+impl From<String> for PhpError {
+	fn from(message: String) -> Self {
+		PhpError {
+			level: ErrorLevel::Fatal,
+			message,
+			line: 0,
+		}
+	}
 }

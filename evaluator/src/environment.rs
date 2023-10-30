@@ -56,4 +56,15 @@ impl Environment {
 		self.identifiers.get(key).cloned()
 	}
 
+	/// Merges differences from another environment, adding missing values.
+	pub fn get_and_set_diff(&mut self, other_env: Environment) {
+		for (key, value) in other_env.vars {
+			self.vars.entry(key).or_insert(value);
+		}
+
+		for (key, value) in other_env.identifiers {
+			self.identifiers.insert(key, value);
+		}
+
+	}
 }

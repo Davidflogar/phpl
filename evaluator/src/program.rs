@@ -16,7 +16,7 @@ pub fn eval_program(input: &str, content: &str) -> Result<()> {
                 if evaluator.die || result.is_err() {
 
 					if result.is_err() {
-						evaluator.output = format!("PHP Fatal Error: {}", result.unwrap_err());
+						evaluator.output = format!("{}", result.unwrap_err().get_message(input));
 					}
 
                     break;
@@ -24,7 +24,7 @@ pub fn eval_program(input: &str, content: &str) -> Result<()> {
             }
 
             for warning in evaluator.warnings {
-                println!("{} in {}", warning.message, input);
+				println!("{}", warning.get_message(input))
             }
 
             print!("{}", evaluator.output);
