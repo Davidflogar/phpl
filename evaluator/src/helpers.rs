@@ -90,3 +90,7 @@ pub fn parse_php_file(
         }
     }
 }
+
+pub fn get_var_name_from_bytes(var: Vec<u8>) -> String {
+	String::from_utf8_lossy(&var).to_string()
+}

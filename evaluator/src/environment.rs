@@ -4,8 +4,8 @@ use crate::php_value::PhpValue;
 
 #[derive(Clone)]
 pub struct Environment {
-    vars: HashMap<String, Rc<RefCell<PhpValue>>>,
-    identifiers: HashMap<String, PhpValue>,
+    vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
+    identifiers: HashMap<Vec<u8>, PhpValue>,
 }
 
 impl Environment {
@@ -16,24 +16,28 @@ impl Environment {
         }
     }
 
-    pub fn delete_var(&mut self, key: &str) {
+    pub fn delete_var(&mut self, key: &Vec<u8>) {
         self.vars.remove(key);
     }
 
-    pub fn set_var(&mut self, key: &str, value: PhpValue) {
+    pub fn set_var(&mut self, key: Vec<u8>, value: PhpValue) {
         self.vars
-            .insert(key.to_string(), Rc::new(RefCell::new(value)));
+            .insert(key, Rc::new(RefCell::new(value)));
     }
 
-    pub fn set_var_rc(&mut self, key: &str, value: Rc<RefCell<PhpValue>>) {
-        self.vars.insert(key.to_string(), value);
+    pub fn set_var_rc(&mut self, key: Vec<u8>, value: Rc<RefCell<PhpValue>>) {
+        self.vars.insert(key, value);
     }
 
-    pub fn get_var(&self, key: &str) -> Option<PhpValue> {
-        let key = if !key.starts_with('$') {
-            format!("${}", key)
+    pub fn get_var(&self, key: Vec<u8>) -> Option<PhpValue> {
+        let key = if key.is_empty() || key[0] != b'$' {
+			let mut new_key: Vec<u8> = vec![b'$'];
+
+			new_key.extend(key);
+
+			new_key
         } else {
-            key.to_string()
+            key
         };
 
         let value = self.vars.get(&key);
@@ -44,15 +48,15 @@ impl Environment {
         }
     }
 
-    pub fn var_exists(&self, key: &str) -> bool {
+    pub fn var_exists(&self, key: &Vec<u8>) -> bool {
         self.vars.contains_key(key)
     }
 
-    pub fn get_var_with_rc(&self, key: &str) -> Option<&Rc<RefCell<PhpValue>>> {
+    pub fn get_var_with_rc(&self, key: &Vec<u8>) -> Option<&Rc<RefCell<PhpValue>>> {
         self.vars.get(key)
     }
 
-    pub fn get_identifier(&self, key: &str) -> Option<PhpValue> {
+    pub fn get_identifier(&self, key: &Vec<u8>) -> Option<PhpValue> {
         self.identifiers.get(key).cloned()
     }
 

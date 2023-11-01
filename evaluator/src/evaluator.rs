@@ -17,7 +17,7 @@ use php_parser_rs::{
     },
 };
 
-use crate::helpers::parse_php_file;
+use crate::helpers::{parse_php_file, get_var_name_from_bytes};
 use crate::{
     environment::Environment,
     helpers::get_variable_span,
@@ -224,7 +224,7 @@ impl Evaluator {
                                 let var_name = self.get_variable_name(va)?;
 
                                 // delete the variable from the environment
-                                self.env.delete_var(var_name.as_str());
+                                self.env.delete_var(&var_name);
                             } else {
                                 return Err(PhpError {
                                     level: ErrorLevel::ParseError,
@@ -254,7 +254,7 @@ impl Evaluator {
                             line: pe.print.line,
                         });
 
-                        return Ok(PhpValue::String(value.get_type()));
+                        return Ok(PhpValue::String(value.get_type().into()));
                     }
 
                     self.output += value_as_string.unwrap().as_str();
@@ -277,7 +277,7 @@ impl Evaluator {
                                     line: pe.print.line,
                                 });
 
-                                return Ok(PhpValue::String(value.get_type()));
+                                return Ok(PhpValue::String(value.get_type().into()));
                             }
 
                             self.output += value_as_string.unwrap().as_str();
@@ -297,9 +297,7 @@ impl Evaluator {
             }
             Expression::Literal(l) => match l {
                 Literal::String(s) => {
-                    let string = s.value.to_string();
-
-                    Ok(PhpValue::String(string))
+                    Ok(PhpValue::String(s.value))
                 }
                 Literal::Integer(i) => {
                     let str_value = str::from_utf8(i.value.as_ref()).unwrap();
@@ -412,14 +410,14 @@ impl Evaluator {
                         let right_var_name = self.get_variable_name(right_var)?;
 
                         if !self.env.var_exists(&right_var_name) {
-                            self.env.set_var(&right_var_name, NULL)
+                            self.env.set_var(right_var_name.clone(), NULL)
                         }
 
                         let cloned_env = self.env.clone();
 
                         let right_value = cloned_env.get_var_with_rc(&right_var_name).unwrap();
 
-                        self.env.set_var_rc(&left_var_name, Rc::clone(right_value));
+                        self.env.set_var_rc(left_var_name, Rc::clone(right_value));
 
                         return Ok(right_value.borrow().clone());
                     } else {
@@ -428,7 +426,7 @@ impl Evaluator {
                         let right_value_clone = right_value.clone();
 
                         if !self.env.var_exists(&left_var_name) {
-                            self.env.set_var(&left_var_name, right_value_clone);
+                            self.env.set_var(left_var_name, right_value_clone);
                         } else {
                             let old_value = self.env.get_var_with_rc(&left_var_name).unwrap();
 
@@ -722,7 +720,7 @@ impl Evaluator {
             }
             Expression::Identifier(identifier) => match identifier {
                 Identifier::SimpleIdentifier(simple_identifier) => {
-                    let identifier_name = &simple_identifier.value.to_string();
+                    let identifier_name = &simple_identifier.value;
 
                     let expr = self.env.get_identifier(identifier_name);
 
@@ -776,14 +774,14 @@ impl Evaluator {
         }
     }
 
-    fn get_variable_name(&mut self, variable: Variable) -> Result<String, PhpError> {
+    fn get_variable_name(&mut self, variable: Variable) -> Result<Vec<u8>, PhpError> {
         match variable {
-            Variable::SimpleVariable(sv) => Ok(sv.name.to_string()),
+            Variable::SimpleVariable(sv) => Ok(sv.name.bytes),
             Variable::VariableVariable(vv) => {
                 let value = self.get_variable_value(*vv.variable)?;
 
                 if let PhpValue::String(value) = value {
-                    Ok(value)
+                    Ok(value.bytes)
                 } else {
                     let error = format!(
                         "Variable variable must be a string, got {}",
@@ -815,12 +813,12 @@ impl Evaluator {
                         line: bvv.start.line,
                     });
 
-                    return Ok("".to_string());
+                    return Ok(b"".to_vec());
                 }
 
                 let variable_name = expr_as_string.unwrap();
 
-                Ok(variable_name)
+                Ok(variable_name.into())
             }
         }
     }
@@ -828,15 +826,15 @@ impl Evaluator {
     fn get_variable_value(&mut self, variable: Variable) -> Result<PhpValue, PhpError> {
         match variable {
             Variable::SimpleVariable(sv) => {
-                let var_name = sv.name.to_string();
+                let var_name = sv.name.bytes;
 
-                let value = self.env.get_var(&var_name);
+                let value = self.env.get_var(var_name.clone());
 
                 if value.is_some() {
                     Ok(value.unwrap())
                 } else {
                     let warning =
-                        format!("Undefined variable {} on line {}", var_name, sv.span.line);
+                        format!("Undefined variable {} on line {}", get_var_name_from_bytes(var_name), sv.span.line);
 
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
@@ -874,7 +872,7 @@ impl Evaluator {
 
                 let variable_name = expr_as_string.unwrap();
 
-                if !self.env.var_exists(&variable_name) {
+                if !self.env.var_exists(&variable_name.clone().into()) {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
                         message: format!("Undefined variable $ on line {}", bvv.start.line),
@@ -884,7 +882,7 @@ impl Evaluator {
                     return Ok(NULL);
                 }
 
-                Ok(self.env.get_var(&variable_name).unwrap())
+                Ok(self.env.get_var(variable_name.into()).unwrap())
             }
         }
     }
@@ -908,10 +906,10 @@ impl Evaluator {
 
         let var_name = self.get_variable_name(var)?;
 
-        let current_var_value = self.env.get_var(&var_name);
+        let current_var_value = self.env.get_var(var_name.clone());
 
         if current_var_value.is_none() {
-            let error = format!("Undefined variable {}", var_name);
+            let error = format!("Undefined variable {}", get_var_name_from_bytes(var_name));
 
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
@@ -948,7 +946,7 @@ impl Evaluator {
         let new_value_clone = new_value.clone();
 
         if !self.env.var_exists(&var_name) {
-            self.env.set_var(&var_name, new_value_clone);
+            self.env.set_var(var_name, new_value_clone);
         } else {
             let old_value = self.env.get_var_with_rc(&var_name).unwrap();
 
@@ -962,12 +960,12 @@ impl Evaluator {
     fn get_var(&mut self, variable: Variable) -> Result<PhpValue, PhpError> {
         let var_name = self.get_variable_name(variable.clone())?;
 
-        let value = self.env.get_var(&var_name);
+        let value = self.env.get_var(var_name.clone());
 
         if value.is_some() {
             Ok(value.unwrap())
         } else {
-            let warning = format!("Undefined variable {}", var_name,);
+            let warning = format!("Undefined variable {}", get_var_name_from_bytes(var_name));
 
             self.warnings.push(PhpError {
                 level: ErrorLevel::Warning,
