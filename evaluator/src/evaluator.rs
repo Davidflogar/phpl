@@ -17,7 +17,8 @@ use php_parser_rs::{
     },
 };
 
-use crate::helpers::{parse_php_file, get_var_name_from_bytes};
+use crate::helpers::{get_string_from_bytes, parse_php_file};
+use crate::php_value::PhpCallable;
 use crate::{
     environment::Environment,
     helpers::get_variable_span,
@@ -91,7 +92,7 @@ impl Evaluator {
                 Ok(NULL)
             }
             Statement::Expression(e) => {
-                let expression_result = self.eval_expression(e.expression);
+                let expression_result = self.eval_expression(&e.expression);
 
                 if expression_result.is_err() {
                     return Err(expression_result.unwrap_err());
@@ -101,7 +102,7 @@ impl Evaluator {
             }
             Statement::Echo(echo) => {
                 for expr in echo.values {
-                    let expression_result = self.eval_expression(expr)?;
+                    let expression_result = self.eval_expression(&expr)?;
 
                     let expression_as_string = expression_result.to_string();
 
@@ -110,7 +111,7 @@ impl Evaluator {
                             level: ErrorLevel::Warning,
                             message: format!(
                                 "{} to string conversion failed.",
-                                expression_result.clone().get_type()
+                                expression_result.get_type()
                             ),
                             line: echo.echo.line,
                         });
@@ -118,7 +119,30 @@ impl Evaluator {
                         self.output += expression_result.get_type().as_str();
                     }
 
-                    self.output += expression_as_string.unwrap().as_str();
+                    self.output += expression_as_string.unwrap_or("".to_string()).as_str();
+                }
+
+                Ok(NULL)
+            }
+            Statement::Function(func) => {
+                let php_callable = PhpCallable {
+                    attributes: func.attributes,
+                    span: func.function,
+                    return_by_reference: func.ampersand.is_some(),
+                    name: func.name.value.clone(),
+                    parameters: func.parameters,
+                    return_type: func.return_type,
+                    body: func.body.statements,
+                };
+
+                let set_identifier = self.set_identifier(
+                    &func.name.value.bytes,
+                    PhpValue::Callable(php_callable),
+                    func.function,
+                );
+
+                if set_identifier.is_some() {
+                    return Err(set_identifier.unwrap());
                 }
 
                 Ok(NULL)
@@ -130,11 +154,11 @@ impl Evaluator {
         }
     }
 
-    fn eval_expression(&mut self, expr: Expression) -> Result<PhpValue, PhpError> {
+    fn eval_expression(&mut self, expr: &Expression) -> Result<PhpValue, PhpError> {
         match expr {
             Expression::Eval(_) => todo!(),
             Expression::Empty(ee) => {
-                let arg = ee.argument.argument;
+                let arg = ee.argument.argument.clone();
 
                 match arg {
                     Argument::Named(na) => Err(PhpError {
@@ -142,9 +166,8 @@ impl Evaluator {
                         message: "Named arguments are not supported in empty()".to_string(),
                         line: na.colon.line,
                     }),
-
                     Argument::Positional(pa) => {
-                        let arg_as_php_value = self.eval_expression(pa.value)?;
+                        let arg_as_php_value = self.eval_expression(&pa.value)?;
 
                         let match_result = match arg_as_php_value {
                             PhpValue::Null => PhpValue::Bool(true),
@@ -173,7 +196,7 @@ impl Evaluator {
                 Ok(NULL)
             }
             Expression::Isset(ie) => {
-                let args = ie.arguments.arguments;
+                let args = ie.arguments.arguments.clone();
 
                 let mut args_values: Vec<PhpValue> = Vec::new();
 
@@ -187,7 +210,7 @@ impl Evaluator {
                             });
                         }
                         Argument::Positional(pa) => {
-                            let arg_as_php_value = self.eval_expression(pa.value)?;
+                            let arg_as_php_value = self.eval_expression(&pa.value)?;
 
                             args_values.push(arg_as_php_value);
                         }
@@ -208,7 +231,7 @@ impl Evaluator {
                 Ok(PhpValue::Bool(true))
             }
             Expression::Unset(ue) => {
-                let args = ue.arguments;
+                let args = ue.arguments.clone();
 
                 for arg in args {
                     match arg {
@@ -220,15 +243,15 @@ impl Evaluator {
                             });
                         }
                         Argument::Positional(pa) => {
-                            if let Expression::Variable(va) = pa.value {
-                                let var_name = self.get_variable_name(va)?;
+                            if let Expression::Variable(var) = pa.value {
+                                let var_name = self.get_variable_name(&var)?;
 
                                 // delete the variable from the environment
                                 self.env.delete_var(&var_name);
                             } else {
                                 return Err(PhpError {
                                     level: ErrorLevel::ParseError,
-                                    message: "Only variables can be unset".to_string(),
+                                    message: "Only variables can be unset()".to_string(),
                                     line: ue.unset.line,
                                 });
                             }
@@ -240,17 +263,16 @@ impl Evaluator {
             }
             Expression::Print(pe) => {
                 if pe.value.is_some() {
-                    let value = self.eval_expression(*pe.value.unwrap())?;
+                    let expr = *pe.value.clone().unwrap();
+
+                    let value = self.eval_expression(&expr)?;
 
                     let value_as_string = value.to_string();
 
                     if value_as_string.is_none() {
                         self.warnings.push(PhpError {
                             level: ErrorLevel::Warning,
-                            message: format!(
-                                "{} to string conversion failed.",
-                                value.clone().get_type()
-                            ),
+                            message: format!("{} to string conversion failed.", value.get_type()),
                             line: pe.print.line,
                         });
 
@@ -259,11 +281,11 @@ impl Evaluator {
 
                     self.output += value_as_string.unwrap().as_str();
                 } else if pe.argument.is_some() {
-                    let arg = *pe.argument.unwrap();
+                    let arg = *pe.argument.clone().unwrap();
 
                     match arg.argument {
                         Argument::Positional(pa) => {
-                            let value = self.eval_expression(pa.value)?;
+                            let value = self.eval_expression(&pa.value)?;
 
                             let value_as_string = value.to_string();
 
@@ -272,7 +294,7 @@ impl Evaluator {
                                     level: ErrorLevel::Warning,
                                     message: format!(
                                         "{} to string conversion failed.",
-                                        value.clone().get_type()
+                                        value.get_type()
                                     ),
                                     line: pe.print.line,
                                 });
@@ -296,9 +318,7 @@ impl Evaluator {
                 Ok(NULL)
             }
             Expression::Literal(l) => match l {
-                Literal::String(s) => {
-                    Ok(PhpValue::String(s.value))
-                }
+                Literal::String(s) => Ok(PhpValue::String(s.value.clone())),
                 Literal::Integer(i) => {
                     let str_value = str::from_utf8(i.value.as_ref()).unwrap();
 
@@ -316,68 +336,68 @@ impl Evaluator {
             },
             Expression::ArithmeticOperation(operation) => match operation {
                 ArithmeticOperationExpression::Addition { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value + right_value)
                 }
                 ArithmeticOperationExpression::Subtraction { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value - right_value)
                 }
                 ArithmeticOperationExpression::Multiplication { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value * right_value)
                 }
                 ArithmeticOperationExpression::Division { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value / right_value)
                 }
                 ArithmeticOperationExpression::Modulo { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value % right_value)
                 }
                 ArithmeticOperationExpression::Exponentiation { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value.pow(right_value))
                 }
                 ArithmeticOperationExpression::Negative { right, .. } => {
-                    let right_value = self.eval_expression(*right)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(right_value * PhpValue::Int(-1))
                 }
                 ArithmeticOperationExpression::Positive { right, .. } => {
-                    let right_value = self.eval_expression(*right)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(right_value * PhpValue::Int(1))
                 }
                 ArithmeticOperationExpression::PreIncrement { right, .. } => {
-                    let right_value = self.eval_expression(*right)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(PhpValue::Int(1) + right_value)
                 }
                 ArithmeticOperationExpression::PostIncrement { left, .. } => {
-                    let left_value = self.eval_expression(*left)?;
+                    let left_value = self.eval_expression(&left)?;
 
                     self.php_value_or_die(left_value + PhpValue::Int(1))
                 }
                 ArithmeticOperationExpression::PreDecrement { right, .. } => {
-                    let right_value = self.eval_expression(*right)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(right_value - PhpValue::Int(1))
                 }
                 ArithmeticOperationExpression::PostDecrement { left, .. } => {
-                    let left_value = self.eval_expression(*left)?;
+                    let left_value = self.eval_expression(&left)?;
 
                     self.php_value_or_die(left_value - PhpValue::Int(1))
                 }
@@ -388,7 +408,7 @@ impl Evaluator {
                     equals,
                     right,
                 } => {
-                    let Expression::Variable(left_var) = *left else {
+                    let Expression::Variable(ref left_var) = **left else {
 						return Err(PhpError {
 							level: ErrorLevel::ParseError,
 							message: "Only variables can be assigned".to_string(),
@@ -396,10 +416,10 @@ impl Evaluator {
 						});
 					};
 
-                    let left_var_name = self.get_variable_name(left_var)?;
+                    let left_var_name = self.get_variable_name(&left_var)?;
 
-                    if let Expression::Reference(reference) = *right {
-                        let Expression::Variable(right_var) = *reference.right else {
+                    if let Expression::Reference(ref reference) = **right {
+                        let Expression::Variable(ref right_var) = *reference.right else {
 							return Err(PhpError {
 								level: ErrorLevel::ParseError,
 								message: "References must be to variables".to_string(),
@@ -407,30 +427,28 @@ impl Evaluator {
 							});
 						};
 
-                        let right_var_name = self.get_variable_name(right_var)?;
+                        let right_var_name = self.get_variable_name(&right_var)?;
 
                         if !self.env.var_exists(&right_var_name) {
-                            self.env.set_var(right_var_name.clone(), NULL)
+                            self.env.set_var(&right_var_name, &NULL)
                         }
 
-                        let cloned_env = self.env.clone();
+                        let right_value = self.env.get_var_with_rc(&right_var_name).unwrap().to_owned();
 
-                        let right_value = cloned_env.get_var_with_rc(&right_var_name).unwrap();
+						let cloned_right_value = Rc::clone(&right_value);
 
-                        self.env.set_var_rc(left_var_name, Rc::clone(right_value));
+                        self.env.set_var_rc(&left_var_name, cloned_right_value);
 
                         return Ok(right_value.borrow().clone());
                     } else {
-                        let right_value = self.eval_expression(*right)?;
-
-                        let right_value_clone = right_value.clone();
+                        let right_value = self.eval_expression(&right)?;
 
                         if !self.env.var_exists(&left_var_name) {
-                            self.env.set_var(left_var_name, right_value_clone);
+                            self.env.set_var(&left_var_name, &right_value);
                         } else {
                             let old_value = self.env.get_var_with_rc(&left_var_name).unwrap();
 
-                            *old_value.borrow_mut() = right_value_clone;
+							*old_value.borrow_mut() = right_value.clone()
                         }
 
                         Ok(right_value)
@@ -440,171 +458,171 @@ impl Evaluator {
                     left,
                     plus_equals,
                     right,
-                } => self.change_var_value(*left, plus_equals, *right, "+"),
+                } => self.change_var_value(left, plus_equals, right, "+"),
                 AssignmentOperationExpression::Subtraction {
                     left,
                     minus_equals,
                     right,
-                } => self.change_var_value(*left, minus_equals, *right, "-"),
+                } => self.change_var_value(left, minus_equals, right, "-"),
                 AssignmentOperationExpression::Multiplication {
                     left,
                     asterisk_equals,
                     right,
-                } => self.change_var_value(*left, asterisk_equals, *right, "*"),
+                } => self.change_var_value(left, asterisk_equals, right, "*"),
                 AssignmentOperationExpression::Division {
                     left,
                     slash_equals,
                     right,
-                } => self.change_var_value(*left, slash_equals, *right, "/"),
+                } => self.change_var_value(left, slash_equals, right, "/"),
                 AssignmentOperationExpression::Modulo {
                     left,
                     percent_equals,
                     right,
-                } => self.change_var_value(*left, percent_equals, *right, "%"),
+                } => self.change_var_value(left, percent_equals, right, "%"),
                 AssignmentOperationExpression::Exponentiation {
                     left,
                     pow_equals,
                     right,
-                } => self.change_var_value(*left, pow_equals, *right, "**"),
+                } => self.change_var_value(left, pow_equals, right, "**"),
                 AssignmentOperationExpression::Concat {
                     left,
                     dot_equals,
                     right,
-                } => self.change_var_value(*left, dot_equals, *right, "."),
+                } => self.change_var_value(left, dot_equals, right, "."),
                 AssignmentOperationExpression::BitwiseAnd {
                     left,
                     ampersand_equals,
                     right,
-                } => self.change_var_value(*left, ampersand_equals, *right, "&"),
+                } => self.change_var_value(left, ampersand_equals, right, "&"),
                 AssignmentOperationExpression::BitwiseOr {
                     left,
                     pipe_equals,
                     right,
-                } => self.change_var_value(*left, pipe_equals, *right, "|"),
+                } => self.change_var_value(left, pipe_equals, right, "|"),
                 AssignmentOperationExpression::BitwiseXor {
                     left,
                     caret_equals,
                     right,
-                } => self.change_var_value(*left, caret_equals, *right, "^"),
+                } => self.change_var_value(left, caret_equals, right, "^"),
                 AssignmentOperationExpression::LeftShift {
                     left,
                     left_shift_equals,
                     right,
-                } => self.change_var_value(*left, left_shift_equals, *right, "<<"),
+                } => self.change_var_value(left, left_shift_equals, right, "<<"),
                 AssignmentOperationExpression::RightShift {
                     left,
                     right_shift_equals,
                     right,
-                } => self.change_var_value(*left, right_shift_equals, *right, ">>"),
+                } => self.change_var_value(left, right_shift_equals, right, ">>"),
                 AssignmentOperationExpression::Coalesce {
                     left,
                     coalesce_equals,
                     right,
-                } => self.change_var_value(*left, coalesce_equals, *right, "??"),
+                } => self.change_var_value(left, coalesce_equals, &right, "??"),
             },
             Expression::BitwiseOperation(operation) => match operation {
                 BitwiseOperationExpression::And { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value & right_value)
                 }
                 BitwiseOperationExpression::Or { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value | right_value)
                 }
                 BitwiseOperationExpression::Xor { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value ^ right_value)
                 }
                 BitwiseOperationExpression::LeftShift { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value << right_value)
                 }
                 BitwiseOperationExpression::RightShift { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_value >> right_value)
                 }
                 BitwiseOperationExpression::Not { right, .. } => {
-                    let right_value = self.eval_expression(*right)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(!right_value)
                 }
             },
             Expression::ComparisonOperation(operation) => match operation {
                 ComparisonOperationExpression::Equal { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value == right_value))
                 }
                 ComparisonOperationExpression::Identical { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
-                    if left_value.clone().get_type() != right_value.clone().get_type() {
+                    if left_value.get_type() != right_value.get_type() {
                         PhpValue::Bool(false);
                     }
 
                     Ok(PhpValue::Bool(left_value == right_value))
                 }
                 ComparisonOperationExpression::NotEqual { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value != right_value))
                 }
                 ComparisonOperationExpression::AngledNotEqual { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value != right_value))
                 }
                 ComparisonOperationExpression::NotIdentical { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
-                    if left_value.clone().get_type() != right_value.clone().get_type() {
+                    if left_value.get_type() != right_value.get_type() {
                         PhpValue::Bool(true);
                     }
 
                     Ok(PhpValue::Bool(left_value != right_value))
                 }
                 ComparisonOperationExpression::LessThan { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value < right_value))
                 }
                 ComparisonOperationExpression::GreaterThan { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value > right_value))
                 }
                 ComparisonOperationExpression::LessThanOrEqual { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value <= right_value))
                 }
                 ComparisonOperationExpression::GreaterThanOrEqual { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value >= right_value))
                 }
                 ComparisonOperationExpression::Spaceship { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     if left_value < right_value {
                         Ok(PhpValue::Int(-1))
@@ -617,57 +635,57 @@ impl Evaluator {
             },
             Expression::LogicalOperation(operation) => match operation {
                 LogicalOperationExpression::And { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(
                         left_value.is_true() && right_value.is_true(),
                     ))
                 }
                 LogicalOperationExpression::Or { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(
                         left_value.is_true() || right_value.is_true(),
                     ))
                 }
                 LogicalOperationExpression::Not { right, .. } => {
-                    let right_value = self.eval_expression(*right)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(!right_value.is_true()))
                 }
                 LogicalOperationExpression::LogicalAnd { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(
                         left_value.is_true() && right_value.is_true(),
                     ))
                 }
                 LogicalOperationExpression::LogicalOr { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(
                         left_value.is_true() || right_value.is_true(),
                     ))
                 }
                 LogicalOperationExpression::LogicalXor { left, right, .. } => {
-                    let left_value = self.eval_expression(*left)?;
-                    let right_value = self.eval_expression(*right)?;
+                    let left_value = self.eval_expression(&left)?;
+                    let right_value = self.eval_expression(&right)?;
 
                     Ok(PhpValue::Bool(left_value.is_true() ^ right_value.is_true()))
                 }
             },
             Expression::Concat(expression) => {
-                let left_value = self.eval_expression(*expression.left)?;
-                let right_value = self.eval_expression(*expression.right)?;
+                let left_value = self.eval_expression(&expression.left)?;
+                let right_value = self.eval_expression(&expression.right)?;
 
                 self.php_value_or_die(left_value.concat(right_value))
             }
             Expression::Instanceof(instanceof) => {
-                let Expression::Variable(left_expr) = *instanceof.left else {
+                let Expression::Variable(left_expr) = &*instanceof.left else {
                     let error =
                         "Left side of instanceof must be a variable".to_string();
 
@@ -686,7 +704,7 @@ impl Evaluator {
 					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: instanceof.instanceof.line });
 				};
 
-                let right_expr_value = self.eval_expression(*instanceof.right)?;
+                let right_expr_value = self.eval_expression(&instanceof.right)?;
 
                 let is_instance_of = left_object.is_instance_of(right_expr_value);
 
@@ -704,16 +722,16 @@ impl Evaluator {
                     line: reference.ampersand.line,
                 })
             }
-            Expression::Parenthesized(parenthesized) => self.eval_expression(*parenthesized.expr),
+            Expression::Parenthesized(parenthesized) => self.eval_expression(&parenthesized.expr),
             Expression::ErrorSuppress(error_expression) => {
                 let old_php_die = self.die;
                 let old_warnings = self.warnings.clone();
 
-                self.eval_expression(*error_expression.expr)?;
+                self.eval_expression(&error_expression.expr)?;
 
                 if old_php_die != self.die || old_warnings.len() != self.warnings.len() {
                     self.die = old_php_die;
-                    self.warnings = old_warnings;
+                    self.warnings = old_warnings.to_vec();
                 }
 
                 Ok(NULL)
@@ -740,16 +758,53 @@ impl Evaluator {
             },
             Expression::Variable(var) => self.get_var(var),
             Expression::Include(include) => {
-                self.handle_include(*include.path, false, include.include)
+                self.handle_include(&include.path, false, include.include)
             }
             Expression::IncludeOnce(include) => {
-                self.handle_include(*include.path, true, include.include_once)
+                self.handle_include(&include.path, true, include.include_once)
             }
             Expression::Require(require) => {
-                self.handle_require(*require.path, false, require.require)
+                self.handle_require(&require.path, false, require.require)
             }
             Expression::RequireOnce(require) => {
-                self.handle_require(*require.path, true, require.require_once)
+                self.handle_require(&require.path, true, require.require_once)
+            }
+            Expression::FunctionCall(call) => {
+                let target = self.eval_expression(&call.target)?;
+
+                let target_name = target.to_string();
+
+                if target_name.is_none() {
+                    self.warnings.push(PhpError {
+                        level: ErrorLevel::Warning,
+                        message: format!("{} to string conversion failed", target.get_type()),
+                        line: call.arguments.left_parenthesis.line,
+                    });
+                }
+
+                let target_name = target_name.unwrap_or("".to_string());
+
+                let target_name_as_vec = target_name.as_bytes().to_vec();
+
+                let function_option = self.env.get_identifier(&target_name_as_vec);
+
+                if function_option.is_none() {
+                    let error = format!("Function {} not found", target_name);
+
+                    return Err(PhpError {
+                        level: ErrorLevel::Fatal,
+                        message: error,
+                        line: call.arguments.left_parenthesis.line,
+                    });
+                }
+
+                let PhpValue::Callable(function) = function_option.unwrap() else {
+					let error = format!("Function {} is not callable", target_name);
+
+					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: call.arguments.left_parenthesis.line });
+				};
+
+                todo!();
             }
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
@@ -774,11 +829,11 @@ impl Evaluator {
         }
     }
 
-    fn get_variable_name(&mut self, variable: Variable) -> Result<Vec<u8>, PhpError> {
+    fn get_variable_name(&mut self, variable: &Variable) -> Result<Vec<u8>, PhpError> {
         match variable {
-            Variable::SimpleVariable(sv) => Ok(sv.name.bytes),
+            Variable::SimpleVariable(sv) => Ok(sv.name.bytes.clone()),
             Variable::VariableVariable(vv) => {
-                let value = self.get_variable_value(*vv.variable)?;
+                let value = self.get_variable_value(&vv.variable)?;
 
                 if let PhpValue::String(value) = value {
                     Ok(value.bytes)
@@ -796,14 +851,14 @@ impl Evaluator {
                 }
             }
             Variable::BracedVariableVariable(bvv) => {
-                let expr_value = self.eval_expression(*bvv.variable)?;
+                let expr_value = self.eval_expression(&bvv.variable)?;
 
                 let expr_as_string = expr_value.to_string();
 
                 if expr_as_string.is_none() {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!("{} to string conversion failed", expr_value.get_type(),),
+                        message: format!("{} to string conversion failed", expr_value.get_type()),
                         line: bvv.start.line,
                     });
 
@@ -823,18 +878,21 @@ impl Evaluator {
         }
     }
 
-    fn get_variable_value(&mut self, variable: Variable) -> Result<PhpValue, PhpError> {
+    fn get_variable_value(&mut self, variable: &Variable) -> Result<PhpValue, PhpError> {
         match variable {
             Variable::SimpleVariable(sv) => {
-                let var_name = sv.name.bytes;
+                let var_name = &sv.name.bytes;
 
-                let value = self.env.get_var(var_name.clone());
+                let value = self.env.get_var(&var_name);
 
                 if value.is_some() {
                     Ok(value.unwrap())
                 } else {
-                    let warning =
-                        format!("Undefined variable {} on line {}", get_var_name_from_bytes(var_name), sv.span.line);
+                    let warning = format!(
+                        "Undefined variable {} on line {}",
+                        get_string_from_bytes(&var_name),
+                        sv.span.line
+                    );
 
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
@@ -845,9 +903,9 @@ impl Evaluator {
                     Ok(NULL)
                 }
             }
-            Variable::VariableVariable(vv) => self.get_var(*vv.variable),
+            Variable::VariableVariable(vv) => self.get_var(&vv.variable),
             Variable::BracedVariableVariable(bvv) => {
-                let expr_value = self.eval_expression(*bvv.variable)?;
+                let expr_value = self.eval_expression(&bvv.variable)?;
 
                 let expr_as_string = expr_value.to_string();
 
@@ -872,7 +930,7 @@ impl Evaluator {
 
                 let variable_name = expr_as_string.unwrap();
 
-                if !self.env.var_exists(&variable_name.clone().into()) {
+                if !self.env.var_exists(&variable_name.as_bytes()) {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
                         message: format!("Undefined variable $ on line {}", bvv.start.line),
@@ -882,21 +940,24 @@ impl Evaluator {
                     return Ok(NULL);
                 }
 
-                Ok(self.env.get_var(variable_name.into()).unwrap())
+                Ok(self.env.get_var(variable_name.as_bytes()).unwrap())
             }
         }
     }
 
     fn change_var_value(
         &mut self,
-        left: Expression,
-        span: Span,
-        right: Expression,
+        left_expr: &Box<Expression>,
+        span: &Span,
+        right_expr: &Box<Expression>,
         operation: &str,
     ) -> Result<PhpValue, PhpError> {
-        let right_value = self.eval_expression(right)?;
+        let left = left_expr;
+        let right = right_expr;
 
-        let Expression::Variable(var) = left else {
+        let right_value = self.eval_expression(&right)?;
+
+        let Expression::Variable(ref var) = **left else {
             return Err(PhpError {
 				level: ErrorLevel::ParseError,
 				message: "Only variables can be assigned".to_string(),
@@ -904,12 +965,12 @@ impl Evaluator {
 			});
         };
 
-        let var_name = self.get_variable_name(var)?;
+        let var_name = self.get_variable_name(&var)?;
 
-        let current_var_value = self.env.get_var(var_name.clone());
+        let current_var_value = self.env.get_var(&var_name);
 
         if current_var_value.is_none() {
-            let error = format!("Undefined variable {}", get_var_name_from_bytes(var_name));
+            let error = format!("Undefined variable {}", get_string_from_bytes(&var_name));
 
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
@@ -943,29 +1004,27 @@ impl Evaluator {
             _ => Ok(NULL),
         }?;
 
-        let new_value_clone = new_value.clone();
-
         if !self.env.var_exists(&var_name) {
-            self.env.set_var(var_name, new_value_clone);
+            self.env.set_var(&var_name, &new_value);
         } else {
             let old_value = self.env.get_var_with_rc(&var_name).unwrap();
 
-            *old_value.borrow_mut() = new_value_clone;
+            *old_value.borrow_mut() = new_value.clone();
         }
 
         Ok(new_value)
     }
 
     /// Returns the value of the variable. If it does not exist, the warning is added and Null is returned.
-    fn get_var(&mut self, variable: Variable) -> Result<PhpValue, PhpError> {
-        let var_name = self.get_variable_name(variable.clone())?;
+    fn get_var(&mut self, variable: &Variable) -> Result<PhpValue, PhpError> {
+        let var_name = self.get_variable_name(&variable)?;
 
-        let value = self.env.get_var(var_name.clone());
+        let value = self.env.get_var(&var_name);
 
         if value.is_some() {
             Ok(value.unwrap())
         } else {
-            let warning = format!("Undefined variable {}", get_var_name_from_bytes(var_name));
+            let warning = format!("Undefined variable {}", get_string_from_bytes(&var_name));
 
             self.warnings.push(PhpError {
                 level: ErrorLevel::Warning,
@@ -992,11 +1051,11 @@ impl Evaluator {
 
     fn handle_include(
         &mut self,
-        path: Expression,
+        path: &Expression,
         once: bool,
         span: Span,
     ) -> Result<PhpValue, PhpError> {
-        let path = self.eval_expression(path)?;
+        let path = self.eval_expression(&path)?;
 
         let path_as_string = path.to_string();
 
@@ -1024,7 +1083,7 @@ impl Evaluator {
             return Ok(PhpValue::Bool(true));
         }
 
-        let content = fs::read_to_string(real_path.clone());
+        let content = fs::read_to_string(&real_path);
 
         if content.is_err() {
             let fn_name = if once { "include_once" } else { "include" };
@@ -1052,11 +1111,11 @@ impl Evaluator {
 
     fn handle_require(
         &mut self,
-        path: Expression,
+        path: &Expression,
         once: bool,
         span: Span,
     ) -> Result<PhpValue, PhpError> {
-        let path = self.eval_expression(path)?;
+        let path = self.eval_expression(&path)?;
 
         let path_as_string = path.to_string();
 
@@ -1084,7 +1143,7 @@ impl Evaluator {
             return Ok(PhpValue::Bool(true));
         }
 
-        let content = fs::read_to_string(real_path.clone());
+        let content = fs::read_to_string(&real_path);
 
         if content.is_err() {
             let fn_name = if once { "require_once" } else { "require" };
@@ -1108,5 +1167,28 @@ impl Evaluator {
         self.required_files.push(real_path.clone());
 
         parse_php_file(self, &real_path, &content.unwrap())
+    }
+
+    pub fn set_identifier(
+        &mut self,
+        ident: &[u8],
+        value: PhpValue,
+        span: Span,
+    ) -> Option<PhpError> {
+        match self.env.identifier_entry(ident.to_vec()) {
+            std::collections::hash_map::Entry::Occupied(entry) => Some(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Cannot redeclare identifier {}",
+                    get_string_from_bytes(entry.key())
+                ),
+                line: span.line,
+            }),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(value);
+
+                None
+            }
+        }
     }
 }

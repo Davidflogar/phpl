@@ -8,6 +8,8 @@ use php_parser_rs::parser::ast::attributes::AttributeGroup;
 use php_parser_rs::parser::ast::functions::{FunctionParameterList, ReturnType};
 use php_parser_rs::parser::ast::Statement;
 
+use crate::helpers::get_string_from_bytes;
+
 const NULL: &str = "null";
 const BOOL: &str = "bool";
 const INT: &str = "int";
@@ -92,7 +94,11 @@ impl PhpValue {
             PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
             PhpValue::Array(_) => None,
             PhpValue::Object(_) => None,
-            PhpValue::Callable(_) => None,
+            PhpValue::Callable(c) => {
+                let name = get_string_from_bytes(&c.name.bytes);
+
+                Some(name)
+            }
             PhpValue::Resource(_) => Some("Resource".to_string()),
         }
     }
@@ -219,6 +225,7 @@ impl PhpValue {
 
     fn perform_arithmetic_operation<F>(
         &self,
+        sign: &str,
         rhs: PhpValue,
         operation: F,
     ) -> Result<PhpValue, PhpError>
@@ -231,7 +238,8 @@ impl PhpValue {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
-                    "Unsupported operation: {} + {}",
+                    "Unsupported operation: {} {} {}",
+                    sign,
                     self.get_type(),
                     rhs.get_type()
                 ),
@@ -272,7 +280,7 @@ impl Add for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| left + right)
+        self.perform_arithmetic_operation("+", rhs, |left, right| left + right)
     }
 }
 
@@ -280,7 +288,7 @@ impl Sub for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| left - right)
+        self.perform_arithmetic_operation("-", rhs, |left, right| left - right)
     }
 }
 
@@ -288,7 +296,7 @@ impl Mul for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn mul(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| left * right)
+        self.perform_arithmetic_operation("*", rhs, |left, right| left * right)
     }
 }
 
@@ -296,7 +304,7 @@ impl Div for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn div(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| left / right)
+        self.perform_arithmetic_operation("/", rhs, |left, right| left / right)
     }
 }
 
@@ -304,7 +312,7 @@ impl Rem for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn rem(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| left % right)
+        self.perform_arithmetic_operation("%", rhs, |left, right| left % right)
     }
 }
 
@@ -312,7 +320,9 @@ impl BitAnd for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| (left as i32 & right as i32) as f32)
+        self.perform_arithmetic_operation("&", rhs, |left, right| {
+            (left as i32 & right as i32) as f32
+        })
     }
 }
 
@@ -320,7 +330,7 @@ impl BitOr for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| (left as i32 | right as i32) as f32)
+        self.perform_arithmetic_operation("|", rhs, |left, right| (left as i32 | right as i32) as f32)
     }
 }
 
@@ -328,7 +338,7 @@ impl BitXor for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| (left as i32 ^ right as i32) as f32)
+        self.perform_arithmetic_operation("^", rhs, |left, right| (left as i32 ^ right as i32) as f32)
     }
 }
 
@@ -336,7 +346,7 @@ impl Shl for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn shl(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| {
+        self.perform_arithmetic_operation("<<", rhs, |left, right| {
             let left_as_int = left as i32;
             let right_as_int = right as i32;
 
@@ -349,7 +359,7 @@ impl Shr for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn shr(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation(rhs, |left, right| {
+        self.perform_arithmetic_operation(">>", rhs, |left, right| {
             let left_as_int = left as i32;
             let right_as_int = right as i32;
 

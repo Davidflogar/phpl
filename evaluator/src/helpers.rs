@@ -10,7 +10,7 @@ use crate::{
     php_value::{PhpError, PhpValue},
 };
 
-pub fn get_variable_span(var: Variable) -> Span {
+pub fn get_variable_span(var: &Variable) -> Span {
     match var {
         Variable::SimpleVariable(v) => v.span,
         Variable::VariableVariable(vv) => vv.span,
@@ -91,6 +91,6 @@ pub fn parse_php_file(
     }
 }
 
-pub fn get_var_name_from_bytes(var: Vec<u8>) -> String {
-	String::from_utf8_lossy(&var).to_string()
+pub fn get_string_from_bytes(var: &[u8]) -> String {
+	String::from_utf8_lossy(var).to_string()
 }
