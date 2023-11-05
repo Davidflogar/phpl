@@ -10,7 +10,7 @@ use crate::{
     php_value::{PhpError, PhpValue},
 };
 
-pub fn get_variable_span(var: &Variable) -> Span {
+pub fn get_span_from_var(var: &Variable) -> Span {
     match var {
         Variable::SimpleVariable(v) => v.span,
         Variable::VariableVariable(vv) => vv.span,
@@ -69,9 +69,9 @@ pub fn parse_php_file(
             // copy the environment
             evaluator.env.get_and_set_diff(child_evalutor.env);
 
-			if last_result.is_null() {
-				last_result = PhpValue::Bool(true);
-			}
+            if last_result.is_null() {
+                last_result = PhpValue::Bool(true);
+            }
 
             Ok(last_result)
         }
@@ -92,5 +92,5 @@ pub fn parse_php_file(
 }
 
 pub fn get_string_from_bytes(var: &[u8]) -> String {
-	String::from_utf8_lossy(var).to_string()
+    String::from_utf8_lossy(var).to_string()
 }

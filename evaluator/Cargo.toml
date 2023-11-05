@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-php-parser-rs = { git = "https://github.com/php-rust-tools/parser" }
+php-parser-rs = { path = "../php-parser" }

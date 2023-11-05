@@ -1,7 +1,4 @@
-use std::{
-    env, fs,
-    io::Result,
-};
+use std::{env, fs, io::Result};
 
 use evaluator::program::eval_program;
 

@@ -14,17 +14,16 @@ pub fn eval_program(input: &str, content: &str) -> Result<()> {
                 let result = evaluator.eval_statement(node);
 
                 if evaluator.die || result.is_err() {
-
-					if result.is_err() {
-						evaluator.output = format!("{}", result.unwrap_err().get_message(input));
-					}
+                    if result.is_err() {
+                        evaluator.output = format!("{}", result.unwrap_err().get_message(input));
+                    }
 
                     break;
                 }
             }
 
             for warning in evaluator.warnings {
-				println!("{}", warning.get_message(input))
+                println!("{}", warning.get_message(input))
             }
 
             print!("{}", evaluator.output);

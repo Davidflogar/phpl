@@ -21,7 +21,8 @@ impl Environment {
     }
 
     pub fn set_var(&mut self, key: &[u8], value: &PhpValue) {
-        self.vars.insert(key.to_vec(), Rc::new(RefCell::new(value.clone())));
+        self.vars
+            .insert(key.to_vec(), Rc::new(RefCell::new(value.clone())));
     }
 
     pub fn set_var_rc(&mut self, key: &[u8], value: Rc<RefCell<PhpValue>>) {
@@ -66,7 +67,7 @@ impl Environment {
         }
 
         for (key, value) in other_env.identifiers {
-            self.identifiers.insert(key, value);
+            self.identifiers.entry(key).or_insert(value);
         }
     }
 

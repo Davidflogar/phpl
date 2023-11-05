@@ -1,13 +1,17 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Not, Rem, Shl, Shr, Sub};
 
 use php_parser_rs::lexer::byte_string::ByteString;
 use php_parser_rs::lexer::token::Span;
 use php_parser_rs::parser::ast::attributes::AttributeGroup;
-use php_parser_rs::parser::ast::functions::{FunctionParameterList, ReturnType};
-use php_parser_rs::parser::ast::Statement;
+use php_parser_rs::parser::ast::data_type::Type;
+use php_parser_rs::parser::ast::functions::ReturnType;
+use php_parser_rs::parser::ast::variables::SimpleVariable;
+use php_parser_rs::parser::ast::{Expression, Statement};
 
+use crate::environment::Environment;
 use crate::helpers::get_string_from_bytes;
 
 const NULL: &str = "null";
@@ -28,7 +32,7 @@ pub enum PhpValue {
     Int(i32),
     Float(f32),
     String(ByteString),
-    Array(Vec<PhpValue>),
+    Array(HashMap<PhpValue, PhpValue>),
     Object(PhpObject),
     Callable(PhpCallable),
     Resource(Resource),
@@ -73,9 +77,18 @@ pub struct PhpCallable {
     pub span: Span,
     pub return_by_reference: bool,
     pub name: ByteString,
-    pub parameters: FunctionParameterList,
+    pub parameters: Vec<CallableArgument>,
     pub return_type: Option<ReturnType>,
     pub body: Vec<Statement>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CallableArgument {
+    pub name: SimpleVariable,
+    pub data_type: Option<Type>,
+    pub default_value: Option<Expression>,
+    pub by_reference: bool,
+    pub ellipsis: bool,
 }
 
 impl PhpValue {
@@ -270,6 +283,14 @@ impl PhpValue {
             _ => 0,
         }
     }
+
+    pub fn is_iterable(&self) -> bool {
+        match self {
+            PhpValue::Array(_) => true,
+            // PhpValue::Object(object) => object.is_instance_of("iterable"); TODO
+            _ => false,
+        }
+    }
 }
 
 /*
@@ -330,7 +351,9 @@ impl BitOr for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation("|", rhs, |left, right| (left as i32 | right as i32) as f32)
+        self.perform_arithmetic_operation("|", rhs, |left, right| {
+            (left as i32 | right as i32) as f32
+        })
     }
 }
 
@@ -338,7 +361,9 @@ impl BitXor for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn bitxor(self, rhs: Self) -> Self::Output {
-        self.perform_arithmetic_operation("^", rhs, |left, right| (left as i32 ^ right as i32) as f32)
+        self.perform_arithmetic_operation("^", rhs, |left, right| {
+            (left as i32 ^ right as i32) as f32
+        })
     }
 }
 
@@ -462,5 +487,15 @@ impl From<String> for PhpError {
             message,
             line: 0,
         }
+    }
+}
+
+impl PhpCallable {
+    pub fn call(
+        self,
+        env: Environment,
+        arguments: HashMap<&str, PhpValue>,
+    ) -> Result<PhpValue, PhpError> {
+        Ok(PhpValue::Null)
     }
 }

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::{fs, str};
 
@@ -18,10 +19,10 @@ use php_parser_rs::{
 };
 
 use crate::helpers::{get_string_from_bytes, parse_php_file};
-use crate::php_value::PhpCallable;
+use crate::php_value::{CallableArgument, PhpCallable};
 use crate::{
     environment::Environment,
-    helpers::get_variable_span,
+    helpers::get_span_from_var,
     php_value::{ErrorLevel, PhpError, PhpValue},
 };
 
@@ -125,12 +126,24 @@ impl Evaluator {
                 Ok(NULL)
             }
             Statement::Function(func) => {
+                let mut callable_args: Vec<CallableArgument> = vec![];
+
+                for arg in func.parameters {
+                    callable_args.push(CallableArgument {
+                        name: arg.name,
+                        data_type: arg.data_type,
+                        by_reference: arg.ampersand.is_some(),
+                        default_value: arg.default,
+                        ellipsis: arg.ellipsis.is_some(),
+                    });
+                }
+
                 let php_callable = PhpCallable {
                     attributes: func.attributes,
                     span: func.function,
                     return_by_reference: func.ampersand.is_some(),
                     name: func.name.value.clone(),
-                    parameters: func.parameters,
+                    parameters: callable_args,
                     return_type: func.return_type,
                     body: func.body.statements,
                 };
@@ -433,9 +446,13 @@ impl Evaluator {
                             self.env.set_var(&right_var_name, &NULL)
                         }
 
-                        let right_value = self.env.get_var_with_rc(&right_var_name).unwrap().to_owned();
+                        let right_value = self
+                            .env
+                            .get_var_with_rc(&right_var_name)
+                            .unwrap()
+                            .to_owned();
 
-						let cloned_right_value = Rc::clone(&right_value);
+                        let cloned_right_value = Rc::clone(&right_value);
 
                         self.env.set_var_rc(&left_var_name, cloned_right_value);
 
@@ -448,7 +465,7 @@ impl Evaluator {
                         } else {
                             let old_value = self.env.get_var_with_rc(&left_var_name).unwrap();
 
-							*old_value.borrow_mut() = right_value.clone()
+                            *old_value.borrow_mut() = right_value.clone()
                         }
 
                         Ok(right_value)
@@ -804,7 +821,54 @@ impl Evaluator {
 					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: call.arguments.left_parenthesis.line });
 				};
 
-                todo!();
+                // parse the arguments
+                if call.arguments.arguments.len() > function.parameters.len() {
+                    let error = format!(
+                        "Too many arguments to function {}, expected {}",
+                        target_name,
+                        function.parameters.len()
+                    );
+
+                    return Err(PhpError {
+                        level: ErrorLevel::Fatal,
+                        message: error,
+                        line: call.arguments.left_parenthesis.line,
+                    });
+                }
+
+                let mut named_arguments: HashMap<Vec<u8>, PhpValue> = HashMap::new();
+                let mut positional_arguments: Vec<PhpValue> = Vec::new();
+                let mut ellipsis = false;
+
+                for argument in &call.arguments.arguments {
+                    match argument {
+                        Argument::Named(arg) => {
+                            let arg_value = self.eval_expression(&arg.value)?;
+
+                            if arg.ellipsis.is_some() {
+                                // check if the argument is iterable
+                                if arg_value.is_iterable() {
+                                    ellipsis = true;
+
+                                    todo!()
+                                } else {
+                                    let error =
+                                        format!("Argument {} is not iterable", arg.name.value);
+
+                                    return Err(PhpError {
+                                        level: ErrorLevel::Fatal,
+                                        message: error,
+                                        line: arg.name.span.line,
+                                    });
+                                }
+                            } else {
+                            }
+                        }
+                        Argument::Positional(arg) => {}
+                    }
+                }
+
+                function.call(self.env.clone(), HashMap::new())
             }
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
@@ -1029,7 +1093,7 @@ impl Evaluator {
             self.warnings.push(PhpError {
                 level: ErrorLevel::Warning,
                 message: warning,
-                line: get_variable_span(variable).line,
+                line: get_span_from_var(variable).line,
             });
 
             Ok(NULL)
