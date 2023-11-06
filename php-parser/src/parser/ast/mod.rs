@@ -4,6 +4,7 @@ extern crate serde;
 use self::schemars::JsonSchema;
 use self::serde::Deserialize;
 use self::serde::Serialize;
+
 use crate::lexer::byte_string::ByteString;
 use crate::lexer::token::Span;
 use crate::lexer::token::TokenKind;

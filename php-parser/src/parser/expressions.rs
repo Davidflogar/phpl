@@ -668,7 +668,7 @@ expressions! {
     isset({
         let isset = state.stream.current().span;
         state.stream.next();
-        let arguments = parameters::argument_list(state)?;
+        let arguments = parameters::argument_list_with_positional_parameters(state)?;
 
         Ok(Expression::Isset(IssetExpression { isset, arguments}))
     })

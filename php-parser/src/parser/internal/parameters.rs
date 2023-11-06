@@ -179,7 +179,7 @@ pub fn constructor_parameter_list(
     })
 }
 
-pub fn argument_list(state: &mut State) -> ParseResult<ArgumentList> {
+fn parse_argument_list(state: &mut State, only_positional: bool) -> ParseResult<ArgumentList> {
     let comments = state.stream.comments();
     let start = utils::skip_left_parenthesis(state)?;
 
@@ -190,6 +190,14 @@ pub fn argument_list(state: &mut State) -> ParseResult<ArgumentList> {
     while !state.stream.is_eof() && state.stream.current().kind != TokenKind::RightParen {
         let span = state.stream.current().span;
         let (named, ellipsis, argument) = argument(state)?;
+
+        if only_positional && named {
+            return Err(error::only_positional_arguments_are_accepted(
+                span,
+                state.stream.current().span,
+            ));
+        }
+
         if named {
             has_used_named_arguments = true;
         } else if has_used_named_arguments {
@@ -227,6 +235,10 @@ pub fn argument_list(state: &mut State) -> ParseResult<ArgumentList> {
         right_parenthesis: end,
         arguments,
     })
+}
+
+pub fn argument_list(state: &mut State) -> ParseResult<ArgumentList> {
+    parse_argument_list(state, false)
 }
 
 pub fn single_argument(
@@ -327,4 +339,11 @@ fn argument(state: &mut State) -> ParseResult<(bool, Option<Span>, Argument)> {
             value,
         }),
     ))
+}
+
+/// A clone of `argument_list` with additional restrictions on the parameters.
+pub fn argument_list_with_positional_parameters(
+    state: &mut State,
+) -> ParseResult<ArgumentList> {
+    parse_argument_list(state, true)
 }

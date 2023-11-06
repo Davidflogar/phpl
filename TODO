@@ -1,0 +1,2 @@
+- Make the isset function only accept variables (from the parser)
+- Make unset not accept named parameters and only accept variables (from the parser)

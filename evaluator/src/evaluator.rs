@@ -174,11 +174,6 @@ impl Evaluator {
                 let arg = ee.argument.argument.clone();
 
                 match arg {
-                    Argument::Named(na) => Err(PhpError {
-                        level: ErrorLevel::ParseError,
-                        message: "Named arguments are not supported in empty()".to_string(),
-                        line: na.colon.line,
-                    }),
                     Argument::Positional(pa) => {
                         let arg_as_php_value = self.eval_expression(&pa.value)?;
 
@@ -196,6 +191,7 @@ impl Evaluator {
 
                         Ok(match_result)
                     }
+                    _ => Ok(NULL),
                 }
             }
             Expression::Die(_) => {
@@ -215,18 +211,12 @@ impl Evaluator {
 
                 for arg in args {
                     match arg {
-                        Argument::Named(na) => {
-                            return Err(PhpError {
-                                level: ErrorLevel::ParseError,
-                                message: "Named arguments are not supported in isset()".to_string(),
-                                line: na.colon.line,
-                            });
-                        }
                         Argument::Positional(pa) => {
                             let arg_as_php_value = self.eval_expression(&pa.value)?;
 
                             args_values.push(arg_as_php_value);
                         }
+                        _ => {}
                     }
                 }
 
@@ -834,38 +824,6 @@ impl Evaluator {
                         message: error,
                         line: call.arguments.left_parenthesis.line,
                     });
-                }
-
-                let mut named_arguments: HashMap<Vec<u8>, PhpValue> = HashMap::new();
-                let mut positional_arguments: Vec<PhpValue> = Vec::new();
-                let mut ellipsis = false;
-
-                for argument in &call.arguments.arguments {
-                    match argument {
-                        Argument::Named(arg) => {
-                            let arg_value = self.eval_expression(&arg.value)?;
-
-                            if arg.ellipsis.is_some() {
-                                // check if the argument is iterable
-                                if arg_value.is_iterable() {
-                                    ellipsis = true;
-
-                                    todo!()
-                                } else {
-                                    let error =
-                                        format!("Argument {} is not iterable", arg.name.value);
-
-                                    return Err(PhpError {
-                                        level: ErrorLevel::Fatal,
-                                        message: error,
-                                        line: arg.name.span.line,
-                                    });
-                                }
-                            } else {
-                            }
-                        }
-                        Argument::Positional(arg) => {}
-                    }
                 }
 
                 function.call(self.env.clone(), HashMap::new())
