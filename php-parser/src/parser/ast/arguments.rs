@@ -91,14 +91,14 @@ impl Node for ArgumentList {
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
 
-pub struct SingleArgument {
+pub struct SinglePositionalArgument {
     pub comments: CommentGroup,
-    pub left_parenthesis: Span,  // `(`
-    pub argument: Argument,      // `$var`
-    pub right_parenthesis: Span, // `)`
+    pub left_parenthesis: Span,       // `(`
+    pub argument: PositionalArgument, // `$var`
+    pub right_parenthesis: Span,      // `)`
 }
 
-impl Node for SingleArgument {
+impl Node for SinglePositionalArgument {
     fn children(&mut self) -> Vec<&mut dyn Node> {
         vec![&mut self.argument]
     }

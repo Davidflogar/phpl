@@ -173,26 +173,21 @@ impl Evaluator {
             Expression::Empty(ee) => {
                 let arg = ee.argument.argument.clone();
 
-                match arg {
-                    Argument::Positional(pa) => {
-                        let arg_as_php_value = self.eval_expression(&pa.value)?;
+                let arg_as_php_value = self.eval_expression(&arg.value)?;
 
-                        let match_result = match arg_as_php_value {
-                            PhpValue::Null => PhpValue::Bool(true),
-                            PhpValue::Bool(b) => {
-                                if !b {
-                                    PhpValue::Bool(true);
-                                }
+                let match_result = match arg_as_php_value {
+                    PhpValue::Null => PhpValue::Bool(true),
+                    PhpValue::Bool(b) => {
+                        if !b {
+                            PhpValue::Bool(true);
+                        }
 
-                                PhpValue::Bool(false)
-                            }
-                            _ => PhpValue::Bool(false),
-                        };
-
-                        Ok(match_result)
+                        PhpValue::Bool(false)
                     }
-                    _ => Ok(NULL),
-                }
+                    _ => PhpValue::Bool(false),
+                };
+
+                Ok(match_result)
             }
             Expression::Die(_) => {
                 self.die();
@@ -286,36 +281,21 @@ impl Evaluator {
                 } else if pe.argument.is_some() {
                     let arg = *pe.argument.clone().unwrap();
 
-                    match arg.argument {
-                        Argument::Positional(pa) => {
-                            let value = self.eval_expression(&pa.value)?;
+                    let value = self.eval_expression(&arg.argument.value)?;
 
-                            let value_as_string = value.to_string();
+                    let value_as_string = value.to_string();
 
-                            if value_as_string.is_none() {
-                                self.warnings.push(PhpError {
-                                    level: ErrorLevel::Warning,
-                                    message: format!(
-                                        "{} to string conversion failed.",
-                                        value.get_type()
-                                    ),
-                                    line: pe.print.line,
-                                });
+                    if value_as_string.is_none() {
+                        self.warnings.push(PhpError {
+                            level: ErrorLevel::Warning,
+                            message: format!("{} to string conversion failed.", value.get_type()),
+                            line: pe.print.line,
+                        });
 
-                                return Ok(PhpValue::String(value.get_type().into()));
-                            }
-
-                            self.output += value_as_string.unwrap().as_str();
-                        }
-                        _ => {
-                            return Err(PhpError {
-                                level: ErrorLevel::ParseError,
-                                message: "Only positional arguments are supported in print()"
-                                    .to_string(),
-                                line: pe.print.line,
-                            });
-                        }
+                        return Ok(PhpValue::String(value.get_type().into()));
                     }
+
+                    self.output += value_as_string.unwrap().as_str();
                 }
 
                 Ok(NULL)

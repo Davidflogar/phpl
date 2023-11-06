@@ -1,5 +1,5 @@
 use crate::lexer::token::{Span, TokenKind};
-use crate::parser::ast::arguments::{Argument, SingleArgument};
+use crate::parser::ast::arguments::{Argument, SinglePositionalArgument};
 use crate::parser::ast::arguments::{ArgumentList, NamedArgument, PositionalArgument};
 use crate::parser::ast::functions::ConstructorParameter;
 use crate::parser::ast::functions::ConstructorParameterList;
@@ -244,8 +244,7 @@ pub fn argument_list(state: &mut State) -> ParseResult<ArgumentList> {
 pub fn single_argument(
     state: &mut State,
     required: bool,
-    only_positional: bool,
-) -> Option<ParseResult<SingleArgument>> {
+) -> Option<ParseResult<SinglePositionalArgument>> {
     let comments = state.stream.comments();
     let start = utils::skip_left_parenthesis(state).ok()?;
 
@@ -253,13 +252,19 @@ pub fn single_argument(
 
     while !state.stream.is_eof() && state.stream.current().kind != TokenKind::RightParen {
         let span = state.stream.current().span;
-        let (named, _, argument) = argument(state).ok()?;
-        if only_positional && named {
+        let (named, _, arg) = argument(state).ok()?;
+
+        if named {
             return Some(Err(error::only_positional_arguments_are_accepted(
                 span,
                 state.stream.current().span,
             )));
         }
+
+		// get the argument as positional
+		let Argument::Positional(argument) = arg else {
+			unreachable!()
+		};
 
         if first_argument.is_some() {
             return Some(Err(error::only_one_argument_is_accepted(
@@ -288,7 +293,7 @@ pub fn single_argument(
 
     first_argument.as_ref()?;
 
-    Some(Ok(SingleArgument {
+    Some(Ok(SinglePositionalArgument {
         comments,
         left_parenthesis: start,
         right_parenthesis: end,

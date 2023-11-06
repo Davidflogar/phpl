@@ -623,7 +623,7 @@ expressions! {
         let eval = state.stream.current().span;
         state.stream.next();
 
-        let argument = Box::new(parameters::single_argument(state, true, true).unwrap()?);
+        let argument = Box::new(parameters::single_argument(state, true).unwrap()?);
 
         Ok(Expression::Eval(EvalExpression { eval, argument }))
     })
@@ -633,7 +633,7 @@ expressions! {
         let empty = state.stream.current().span;
         state.stream.next();
 
-        let argument = Box::new(parameters::single_argument(state, true, true).unwrap()?);
+        let argument = Box::new(parameters::single_argument(state, true).unwrap()?);
 
         Ok(Expression::Empty(EmptyExpression { empty, argument }))
     })
@@ -643,7 +643,7 @@ expressions! {
         let die = state.stream.current().span;
         state.stream.next();
 
-        let argument = match parameters::single_argument(state, false, true) {
+        let argument = match parameters::single_argument(state, false) {
             Some(arg) => Some(Box::new(arg?)),
             None => None,
         };
@@ -656,7 +656,7 @@ expressions! {
         let exit = state.stream.current().span;
         state.stream.next();
 
-        let argument = match parameters::single_argument(state, false, true) {
+        let argument = match parameters::single_argument(state, false) {
             Some(arg) => Some(Box::new(arg?)),
             None => None,
         };
@@ -690,7 +690,7 @@ expressions! {
         let mut value = None;
         let mut argument = None;
 
-        if let Some(arg) = parameters::single_argument(state, false, true) {
+        if let Some(arg) = parameters::single_argument(state, false) {
             argument = Some(Box::new(arg?));
         } else {
             value = Some(Box::new(create(state)?));

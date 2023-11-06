@@ -10,7 +10,7 @@ use crate::lexer::token::Span;
 use crate::lexer::token::TokenKind;
 use crate::node::Node;
 use crate::parser::ast::arguments::ArgumentPlaceholder;
-use crate::parser::ast::arguments::{ArgumentList, SingleArgument};
+use crate::parser::ast::arguments::{ArgumentList, SinglePositionalArgument};
 use crate::parser::ast::classes::AnonymousClassExpression;
 use crate::parser::ast::classes::ClassStatement;
 use crate::parser::ast::comments::Comment;
@@ -444,28 +444,28 @@ impl Node for Use {
 pub struct EvalExpression {
     pub eval: Span,
     // eval
-    pub argument: Box<SingleArgument>, // ("$a = 1")
+    pub argument: Box<SinglePositionalArgument>, // ("$a = 1")
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct EmptyExpression {
     pub empty: Span,
     // empty
-    pub argument: Box<SingleArgument>, // ($a)
+    pub argument: Box<SinglePositionalArgument>, // ($a)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct DieExpression {
     pub die: Span,
     // die
-    pub argument: Option<Box<SingleArgument>>, // (1)
+    pub argument: Option<Box<SinglePositionalArgument>>, // (1)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct ExitExpression {
     pub exit: Span,
     // exit
-    pub argument: Option<Box<SingleArgument>>, // (1)
+    pub argument: Option<Box<SinglePositionalArgument>>, // (1)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
@@ -488,7 +488,7 @@ pub struct PrintExpression {
     // print
     pub value: Option<Box<Expression>>,
     // 1
-    pub argument: Option<Box<SingleArgument>>, // (1)
+    pub argument: Option<Box<SinglePositionalArgument>>, // (1)
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
