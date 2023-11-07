@@ -479,7 +479,7 @@ pub struct IssetExpression {
 pub struct UnsetExpression {
     pub unset: Span,
     // unset
-    pub arguments: ArgumentList, // `($a, ...)`
+    pub variables: Vec<Variable>, // `($a, ...)`
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
@@ -1212,13 +1212,19 @@ impl Node for ExitExpression {
 
 impl Node for IssetExpression {
     fn children(&mut self) -> Vec<&mut dyn Node> {
-        self.variables.iter_mut().map(|i| i as &mut dyn Node).collect()
+        self.variables
+            .iter_mut()
+            .map(|i| i as &mut dyn Node)
+            .collect()
     }
 }
 
 impl Node for UnsetExpression {
     fn children(&mut self) -> Vec<&mut dyn Node> {
-        vec![&mut self.arguments]
+        self.variables
+            .iter_mut()
+            .map(|i| i as &mut dyn Node)
+            .collect()
     }
 }
 

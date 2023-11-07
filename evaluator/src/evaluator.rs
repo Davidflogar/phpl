@@ -10,7 +10,6 @@ use php_parser_rs::parser::ast::operators::{
 use php_parser_rs::{
     lexer::token::Span,
     parser::ast::{
-        arguments::Argument,
         literals::Literal,
         operators::{ArithmeticOperationExpression, AssignmentOperationExpression},
         variables::Variable,
@@ -223,33 +222,13 @@ impl Evaluator {
                 Ok(PhpValue::Bool(true))
             }
             Expression::Unset(ue) => {
-                let args = ue.arguments.clone();
+                let args = &ue.variables;
 
-                for arg in args {
-                    match arg {
-                        Argument::Named(arg) => {
-                            return Err(PhpError {
-                                level: ErrorLevel::ParseError,
-                                message: "Named arguments are not supported in unset()".to_string(),
-                                line: arg.colon.line,
-                            });
-                        }
-                        Argument::Positional(pa) => {
-                            if let Expression::Variable(var) = pa.value {
-                                let var_name = self.get_variable_name(&var)?;
+				for arg in args {
+					let var_name = self.get_variable_name(arg)?;
 
-                                // delete the variable from the environment
-                                self.env.delete_var(&var_name);
-                            } else {
-                                return Err(PhpError {
-                                    level: ErrorLevel::ParseError,
-                                    message: "Only variables can be unset()".to_string(),
-                                    line: ue.unset.line,
-                                });
-                            }
-                        }
-                    }
-                }
+					self.env.delete_var(&var_name);
+				}
 
                 Ok(NULL)
             }

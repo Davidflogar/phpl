@@ -1003,6 +1003,16 @@ pub fn cannot_use_isset_on_expression_result(span: Span, current_span: Span) -> 
     )
 }
 
+pub fn cannot_use_unset_on_expression_result(span: Span, current_span: Span) -> ParseError {
+    let message = "Cannot use unset() on the result of an expression";
+
+    ParseError::new("E054".to_string(), message, span).error(
+		"variable/s were expected as argument",
+        span.position,
+		current_span.position - span.position,
+    )
+}
+
 impl From<SyntaxError> for ParseError {
     fn from(e: SyntaxError) -> Self {
         Self {

@@ -1,2 +1,1 @@
-- Make unset not accept named parameters and only accept variables (from the parser)
 - Avoid division by zero (from the evaluator)

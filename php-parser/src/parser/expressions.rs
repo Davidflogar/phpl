@@ -671,11 +671,12 @@ expressions! {
         state.stream.next();
         let arguments = parameters::argument_list_with_positional_parameters(state)?;
 
-        let mut variables = vec![];
 
-		if arguments.arguments.len() == 0 {
-			return Err(error::argument_is_required(isset, state.stream.current().span));
-		}
+        if arguments.arguments.len() == 0 {
+            return Err(error::argument_is_required(isset, state.stream.current().span));
+        }
+
+        let mut variables = vec![];
 
         for argument in arguments.arguments {
             match argument {
@@ -697,9 +698,28 @@ expressions! {
     unset({
         let unset = state.stream.current().span;
         state.stream.next();
-        let arguments = parameters::argument_list(state)?;
+        let arguments = parameters::argument_list_with_positional_parameters(state)?;
 
-        Ok(Expression::Unset(UnsetExpression { unset, arguments}))
+        if arguments.arguments.len() == 0 {
+            return Err(error::argument_is_required(unset, state.stream.current().span));
+        }
+
+        let mut variables = vec![];
+
+        for argument in arguments.arguments {
+            match argument {
+                Argument::Positional(arg) => {
+                    let Expression::Variable(variable) = arg.value else {
+						return Err(error::cannot_use_unset_on_expression_result(unset, state.stream.current().span));
+                    };
+
+                    variables.push(variable);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(Expression::Unset(UnsetExpression {unset, variables}))
     })
 
     #[before(reserved_identifier_function_call), current(TokenKind::Print)]
