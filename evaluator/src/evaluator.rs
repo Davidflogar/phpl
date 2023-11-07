@@ -184,6 +184,14 @@ impl Evaluator {
 
                         PhpValue::Bool(false)
                     }
+					PhpValue::String(s) => {
+						let string = get_string_from_bytes(&s.bytes);
+
+						PhpValue::Bool(string == "" || string == "0")
+					}
+					PhpValue::Float(f) => PhpValue::Bool(f == 0.0),
+					PhpValue::Int(i) => PhpValue::Bool(i == 0),
+					PhpValue::Array(a) => PhpValue::Bool(a.len() > 0),
                     _ => PhpValue::Bool(false),
                 };
 
@@ -200,31 +208,17 @@ impl Evaluator {
                 Ok(NULL)
             }
             Expression::Isset(ie) => {
-                let args = ie.arguments.arguments.clone();
+                let args = &ie.variables;
 
-                let mut args_values: Vec<PhpValue> = Vec::new();
+				for arg in args {
+					let var_name = self.get_variable_name(arg)?;
 
-                for arg in args {
-                    match arg {
-                        Argument::Positional(pa) => {
-                            let arg_as_php_value = self.eval_expression(&pa.value)?;
+					let var_exists = self.env.get_var(&var_name);
 
-                            args_values.push(arg_as_php_value);
-                        }
-                        _ => {}
-                    }
-                }
-
-                for arg_value in args_values {
-                    match arg_value {
-                        PhpValue::Null => {
-                            PhpValue::Bool(false);
-                        }
-                        _ => {
-                            continue;
-                        }
-                    }
-                }
+					if var_exists.is_none() {
+						return Ok(PhpValue::Bool(false));
+					}
+				}
 
                 Ok(PhpValue::Bool(true))
             }

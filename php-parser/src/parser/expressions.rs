@@ -40,6 +40,7 @@ use crate::parser::internal::utils;
 use crate::parser::internal::variables;
 use crate::parser::state::State;
 
+use super::ast::arguments::Argument;
 use super::ast::literals::LiteralStringKind;
 use super::ast::BoolExpression;
 use super::ast::CastExpression;
@@ -670,7 +671,26 @@ expressions! {
         state.stream.next();
         let arguments = parameters::argument_list_with_positional_parameters(state)?;
 
-        Ok(Expression::Isset(IssetExpression { isset, arguments}))
+        let mut variables = vec![];
+
+		if arguments.arguments.len() == 0 {
+			return Err(error::argument_is_required(isset, state.stream.current().span));
+		}
+
+        for argument in arguments.arguments {
+            match argument {
+                Argument::Positional(arg) => {
+                    let Expression::Variable(variable) = arg.value else {
+                        return Err(error::cannot_use_isset_on_expression_result(isset, state.stream.current().span));
+                    };
+
+                    variables.push(variable);
+                }
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(Expression::Isset(IssetExpression { isset, variables }))
     })
 
     #[before(print), current(TokenKind::Unset), peek(TokenKind::LeftParen)]

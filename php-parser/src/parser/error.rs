@@ -993,6 +993,16 @@ pub fn argument_is_required(span: Span, current_span: Span) -> ParseError {
     )
 }
 
+pub fn cannot_use_isset_on_expression_result(span: Span, current_span: Span) -> ParseError {
+    let message = "Cannot use isset() on the result of an expression";
+
+    ParseError::new("E053".to_string(), message, span).error(
+        "you can use \"null !== expression\" instead",
+        span.position,
+        current_span.position - span.position,
+    )
+}
+
 impl From<SyntaxError> for ParseError {
     fn from(e: SyntaxError) -> Self {
         Self {

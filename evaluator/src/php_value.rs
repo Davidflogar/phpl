@@ -205,40 +205,28 @@ impl PhpValue {
         }
     }
 
-    pub fn to_float(&self) -> Result<f32, PhpError> {
+    pub fn to_float(&self) -> Option<f32> {
         match self {
-            PhpValue::Int(i) => Ok(*i as f32),
-            PhpValue::Float(f) => Ok(*f),
+            PhpValue::Int(i) => Some(*i as f32),
+            PhpValue::Float(f) => Some(*f),
             PhpValue::String(s) => {
                 let str_value = std::str::from_utf8(&s.bytes).unwrap();
 
                 let float_value = str_value.parse();
 
                 if float_value.is_err() {
-                    return Err(PhpError {
-                        level: ErrorLevel::Fatal,
-                        message: "Cannot convert string to float".to_string(),
-                        line: 0,
-                    });
+                    return None;
                 }
 
-                return Ok(float_value.unwrap());
+                return Some(float_value.unwrap());
             }
-            _ => {
-                let error_message = format!("Cannot convert {} to float", self.get_type());
-
-                Err(PhpError {
-                    level: ErrorLevel::Fatal,
-                    message: error_message,
-                    line: 0,
-                })
-            }
+            _ => None,
         }
     }
 
     fn perform_arithmetic_operation<F>(
         &self,
-        sign: &str,
+        operation_sign: &str,
         rhs: PhpValue,
         operation: F,
     ) -> Result<PhpValue, PhpError>
@@ -252,16 +240,32 @@ impl PhpValue {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "Unsupported operation: {} {} {}",
-                    sign,
                     self.get_type(),
+					operation_sign,
                     rhs.get_type()
                 ),
                 line: 0,
             });
         }
 
-        let left = self.to_float()?;
-        let right = rhs.to_float()?;
+        let left_float = self.to_float();
+        let right_float = rhs.to_float();
+
+		if left_float.is_none() || right_float.is_none() {
+			return Err(PhpError {
+				level: ErrorLevel::Fatal,
+				message: format!(
+					"Unsupported operation: {} {} {}",
+					self.get_type(),
+					operation_sign,
+					rhs.get_type()
+				),
+				line: 0,
+			});
+		}
+
+		let left = left_float.unwrap();
+		let right = right_float.unwrap();
 
         if self_type == INT {
             return Ok(PhpValue::Int(operation(left, right) as i32));
