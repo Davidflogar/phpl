@@ -241,7 +241,7 @@ impl PhpValue {
                 message: format!(
                     "Unsupported operation: {} {} {}",
                     self.get_type(),
-					operation_sign,
+                    operation_sign,
                     rhs.get_type()
                 ),
                 line: 0,
@@ -251,21 +251,21 @@ impl PhpValue {
         let left_float = self.to_float();
         let right_float = rhs.to_float();
 
-		if left_float.is_none() || right_float.is_none() {
-			return Err(PhpError {
-				level: ErrorLevel::Fatal,
-				message: format!(
-					"Unsupported operation: {} {} {}",
-					self.get_type(),
-					operation_sign,
-					rhs.get_type()
-				),
-				line: 0,
-			});
-		}
+        if left_float.is_none() || right_float.is_none() {
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Unsupported operation: {} {} {}",
+                    self.get_type(),
+                    operation_sign,
+                    rhs.get_type()
+                ),
+                line: 0,
+            });
+        }
 
-		let left = left_float.unwrap();
-		let right = right_float.unwrap();
+        let left = left_float.unwrap();
+        let right = right_float.unwrap();
 
         if self_type == INT {
             return Ok(PhpValue::Int(operation(left, right) as i32));
@@ -329,6 +329,28 @@ impl Div for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn div(self, rhs: Self) -> Self::Output {
+        let right_to_float = rhs.to_float();
+
+        if right_to_float.is_none() {
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Unsupported operation: {} / {}",
+                    self.get_type(),
+                    rhs.get_type()
+                ),
+                line: 0,
+            });
+        }
+
+		if right_to_float.unwrap() == 0.0 {
+			return Err(PhpError {
+				level: ErrorLevel::Fatal,
+				message: format!("Division by zero"),
+				line: 0,
+			});
+		}
+
         self.perform_arithmetic_operation("/", rhs, |left, right| left / right)
     }
 }

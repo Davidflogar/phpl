@@ -1,1 +1,2 @@
-- Avoid division by zero (from the evaluator)
+- FunctionCall expression (evaluator:732)
+- Add exceptions instead of stopping the program with any fatal error

@@ -207,10 +207,10 @@ impl Evaluator {
                 Ok(NULL)
             }
             Expression::Isset(ie) => {
-                let args = &ie.variables;
+                let variables = &ie.variables;
 
-				for arg in args {
-					let var_name = self.get_variable_name(arg)?;
+				for var in variables {
+					let var_name = self.get_variable_name(var)?;
 
 					let var_exists = self.env.get_var(&var_name);
 
@@ -291,71 +291,71 @@ impl Evaluator {
                 }
             },
             Expression::ArithmeticOperation(operation) => match operation {
-                ArithmeticOperationExpression::Addition { left, right, .. } => {
+                ArithmeticOperationExpression::Addition { left, plus, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value + right_value)
+                    self.php_value_or_die(plus, left_value + right_value)
                 }
-                ArithmeticOperationExpression::Subtraction { left, right, .. } => {
+                ArithmeticOperationExpression::Subtraction { left, minus, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value - right_value)
+                    self.php_value_or_die(minus, left_value - right_value)
                 }
-                ArithmeticOperationExpression::Multiplication { left, right, .. } => {
+                ArithmeticOperationExpression::Multiplication { left, asterisk, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value * right_value)
+                    self.php_value_or_die(asterisk, left_value * right_value)
                 }
-                ArithmeticOperationExpression::Division { left, right, .. } => {
+                ArithmeticOperationExpression::Division { left, slash, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value / right_value)
+                    self.php_value_or_die(slash, left_value / right_value)
                 }
-                ArithmeticOperationExpression::Modulo { left, right, .. } => {
+                ArithmeticOperationExpression::Modulo { left, percent, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value % right_value)
+                    self.php_value_or_die(percent, left_value % right_value)
                 }
-                ArithmeticOperationExpression::Exponentiation { left, right, .. } => {
+                ArithmeticOperationExpression::Exponentiation { left, pow, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value.pow(right_value))
+                    self.php_value_or_die(pow, left_value.pow(right_value))
                 }
-                ArithmeticOperationExpression::Negative { right, .. } => {
+                ArithmeticOperationExpression::Negative { right, minus } => {
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(right_value * PhpValue::Int(-1))
+                    self.php_value_or_die(minus, right_value * PhpValue::Int(-1))
                 }
-                ArithmeticOperationExpression::Positive { right, .. } => {
+                ArithmeticOperationExpression::Positive { right, plus } => {
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(right_value * PhpValue::Int(1))
+                    self.php_value_or_die(plus, right_value * PhpValue::Int(1))
                 }
-                ArithmeticOperationExpression::PreIncrement { right, .. } => {
+                ArithmeticOperationExpression::PreIncrement { right, increment } => {
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(PhpValue::Int(1) + right_value)
+                    self.php_value_or_die(increment, PhpValue::Int(1) + right_value)
                 }
-                ArithmeticOperationExpression::PostIncrement { left, .. } => {
+                ArithmeticOperationExpression::PostIncrement { left, increment } => {
                     let left_value = self.eval_expression(&left)?;
 
-                    self.php_value_or_die(left_value + PhpValue::Int(1))
+                    self.php_value_or_die(increment, left_value + PhpValue::Int(1))
                 }
-                ArithmeticOperationExpression::PreDecrement { right, .. } => {
+                ArithmeticOperationExpression::PreDecrement { right, decrement } => {
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(right_value - PhpValue::Int(1))
+                    self.php_value_or_die(decrement, right_value - PhpValue::Int(1))
                 }
-                ArithmeticOperationExpression::PostDecrement { left, .. } => {
+                ArithmeticOperationExpression::PostDecrement { left, decrement } => {
                     let left_value = self.eval_expression(&left)?;
 
-                    self.php_value_or_die(left_value - PhpValue::Int(1))
+                    self.php_value_or_die(decrement, left_value - PhpValue::Int(1))
                 }
             },
             Expression::AssignmentOperation(operation) => match operation {
@@ -481,40 +481,40 @@ impl Evaluator {
                 } => self.change_var_value(left, coalesce_equals, &right, "??"),
             },
             Expression::BitwiseOperation(operation) => match operation {
-                BitwiseOperationExpression::And { left, right, .. } => {
+                BitwiseOperationExpression::And { left, and, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value & right_value)
+                    self.php_value_or_die(and, left_value & right_value)
                 }
-                BitwiseOperationExpression::Or { left, right, .. } => {
+                BitwiseOperationExpression::Or { left, or, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value | right_value)
+                    self.php_value_or_die(or, left_value | right_value)
                 }
-                BitwiseOperationExpression::Xor { left, right, .. } => {
+                BitwiseOperationExpression::Xor { left, xor, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value ^ right_value)
+                    self.php_value_or_die(xor, left_value ^ right_value)
                 }
-                BitwiseOperationExpression::LeftShift { left, right, .. } => {
+                BitwiseOperationExpression::LeftShift { left, left_shift, right} => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value << right_value)
+                    self.php_value_or_die(left_shift, left_value << right_value)
                 }
-                BitwiseOperationExpression::RightShift { left, right, .. } => {
+                BitwiseOperationExpression::RightShift { left, right_shift, right } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(left_value >> right_value)
+                    self.php_value_or_die(right_shift, left_value >> right_value)
                 }
-                BitwiseOperationExpression::Not { right, .. } => {
+                BitwiseOperationExpression::Not { right, not } => {
                     let right_value = self.eval_expression(&right)?;
 
-                    self.php_value_or_die(!right_value)
+                    self.php_value_or_die(not, !right_value)
                 }
             },
             Expression::ComparisonOperation(operation) => match operation {
@@ -642,7 +642,7 @@ impl Evaluator {
                 let left_value = self.eval_expression(&expression.left)?;
                 let right_value = self.eval_expression(&expression.right)?;
 
-                self.php_value_or_die(left_value.concat(right_value))
+                self.php_value_or_die(&expression.dot, left_value.concat(right_value))
             }
             Expression::Instanceof(instanceof) => {
                 let Expression::Variable(left_expr) = &*instanceof.left else {
@@ -794,13 +794,21 @@ impl Evaluator {
         self.die = true;
     }
 
+	/// Check that `value` is PhpValue, if it is not it returns the error.
+	///
+	/// It is used with arithmetic operations and logical operations.
     fn php_value_or_die(
         &mut self,
+		span: &Span,
         value: Result<PhpValue, PhpError>,
     ) -> Result<PhpValue, PhpError> {
         match value {
             Ok(value) => Ok(value),
-            Err(error) => Err(error),
+            Err(mut error) => {
+				error.line = span.line;
+
+				Err(error)
+			},
         }
     }
 
@@ -957,18 +965,18 @@ impl Evaluator {
         let current_var_value = current_var_value.unwrap();
 
         let new_value = match operation {
-            "+" => self.php_value_or_die(current_var_value + right_value),
-            "-" => self.php_value_or_die(current_var_value - right_value),
-            "*" => self.php_value_or_die(current_var_value * right_value),
-            "/" => self.php_value_or_die(current_var_value / right_value),
-            "%" => self.php_value_or_die(current_var_value % right_value),
-            "**" => self.php_value_or_die(current_var_value.pow(right_value)),
-            "." => self.php_value_or_die(current_var_value.concat(right_value)),
-            "&" => self.php_value_or_die(current_var_value & right_value),
-            "|" => self.php_value_or_die(current_var_value | right_value),
-            "^" => self.php_value_or_die(current_var_value ^ right_value),
-            "<<" => self.php_value_or_die(current_var_value << right_value),
-            ">>" => self.php_value_or_die(current_var_value >> right_value),
+            "+" => self.php_value_or_die(span, current_var_value + right_value),
+            "-" => self.php_value_or_die(span, current_var_value - right_value),
+            "*" => self.php_value_or_die(span, current_var_value * right_value),
+            "/" => self.php_value_or_die(span, current_var_value / right_value),
+            "%" => self.php_value_or_die(span, current_var_value % right_value),
+            "**" => self.php_value_or_die(span, current_var_value.pow(right_value)),
+            "." => self.php_value_or_die(span, current_var_value.concat(right_value)),
+            "&" => self.php_value_or_die(span, current_var_value & right_value),
+            "|" => self.php_value_or_die(span, current_var_value | right_value),
+            "^" => self.php_value_or_die(span, current_var_value ^ right_value),
+            "<<" => self.php_value_or_die(span, current_var_value << right_value),
+            ">>" => self.php_value_or_die(span, current_var_value >> right_value),
             "??" => {
                 if current_var_value.is_null() {
                     Ok(right_value)
