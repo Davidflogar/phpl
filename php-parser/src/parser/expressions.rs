@@ -159,8 +159,15 @@ fn for_precedence(state: &mut State, precedence: Precedence) -> ParseResult<Expr
                 TokenKind::Equals if op.kind == TokenKind::Ampersand => {
                     state.stream.next();
 
-                    // FIXME: You should only be allowed to assign a referencable variable,
-                    //        here, not any old expression.
+					let s = state.stream.previous();
+
+					if !matches!(left, Expression::Variable(_)) {
+                        return Err(error::unexpected_token(
+                            vec![],
+                            s,
+                        ));
+                    }
+
                     let right = Box::new(for_precedence(state, rpred)?);
 
                     Expression::AssignmentOperation(AssignmentOperationExpression::Assign {
@@ -277,6 +284,13 @@ fn for_precedence(state: &mut State, precedence: Precedence) -> ParseResult<Expr
                             },
                         ),
                         TokenKind::Equals => {
+							if !matches!(*left, Expression::Variable(_)) {
+								return Err(error::unexpected_token(
+									vec![],
+									current,
+								));
+							}
+
                             Expression::AssignmentOperation(AssignmentOperationExpression::Assign {
                                 left,
                                 equals: span,
@@ -710,7 +724,7 @@ expressions! {
             match argument {
                 Argument::Positional(arg) => {
                     let Expression::Variable(variable) = arg.value else {
-						return Err(error::cannot_use_unset_on_expression_result(unset, state.stream.current().span));
+                        return Err(error::cannot_use_unset_on_expression_result(unset, state.stream.current().span));
                     };
 
                     variables.push(variable);

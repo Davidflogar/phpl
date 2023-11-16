@@ -1,11 +1,51 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{hash_map::Entry, HashMap},
+    rc::Rc,
+};
 
-use crate::php_value::PhpValue;
+use php_parser_rs::lexer::token::Span;
+
+use crate::{
+    helpers::get_string_from_bytes,
+    php_value::{ErrorLevel, PhpError, PhpValue},
+};
+
+#[derive(Clone)]
+pub struct TrackedChanges {
+    pub added_vars: Vec<Vec<u8>>,
+    pub added_identifiers: Vec<Vec<u8>>,
+
+    /// Contains a list of variables that have been modified.
+    ///
+    /// It is a map from the variable name to the value of the variable before the modification.
+    pub modified_vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
+}
+
+impl TrackedChanges {
+    pub fn new() -> TrackedChanges {
+        TrackedChanges {
+            added_vars: Vec::new(),
+            added_identifiers: Vec::new(),
+            modified_vars: HashMap::new(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct Environment {
     vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
+
+    /// All identifiers, such as functions or constants.
     identifiers: HashMap<Vec<u8>, PhpValue>,
+
+    /// Determines whether modifications to the environment should be monitored, including the addition of new variables and functions.
+    ///
+    /// If set to `true`, any changes will be recorded in the `tracked_changes` field.
+    /// Note: Deletion of a variable will not be included in the tracking.
+    trace: bool,
+
+    tracked_changes: TrackedChanges,
 }
 
 impl Environment {
@@ -13,6 +53,8 @@ impl Environment {
         Environment {
             vars: HashMap::new(),
             identifiers: HashMap::new(),
+            trace: false,
+            tracked_changes: TrackedChanges::new(),
         }
     }
 
@@ -20,12 +62,40 @@ impl Environment {
         self.vars.remove(key);
     }
 
-    pub fn set_var(&mut self, key: &[u8], value: &PhpValue) {
+    pub fn insert_var(&mut self, key: &[u8], value: &PhpValue) {
+        if self.trace {
+            match self.vars.entry(key.to_vec()) {
+                Entry::Occupied(_) => {
+                    let old_value = self.get_var_with_rc(key).unwrap().clone();
+
+                    self.tracked_changes
+                        .modified_vars
+                        .insert(key.to_vec(), old_value);
+                }
+                Entry::Vacant(_) => {
+                    self.tracked_changes.added_vars.push(key.to_vec());
+                }
+            }
+        }
+
         self.vars
             .insert(key.to_vec(), Rc::new(RefCell::new(value.clone())));
     }
 
-    pub fn set_var_rc(&mut self, key: &[u8], value: Rc<RefCell<PhpValue>>) {
+    pub fn insert_var_rc(&mut self, key: &[u8], value: Rc<RefCell<PhpValue>>) {
+        if self.trace {
+            match self.vars.entry(key.to_vec()) {
+                Entry::Occupied(_) => {
+                    self.tracked_changes
+                        .modified_vars
+                        .insert(key.to_vec(), value.clone());
+                }
+                Entry::Vacant(_) => {
+                    self.tracked_changes.added_vars.push(key.to_vec());
+                }
+            }
+        }
+
         self.vars.insert(key.to_vec(), value);
     }
 
@@ -56,25 +126,56 @@ impl Environment {
         self.vars.get(key)
     }
 
-    pub fn get_identifier(&self, key: &[u8]) -> Option<PhpValue> {
+    pub fn get_ident(&self, key: &[u8]) -> Option<PhpValue> {
         self.identifiers.get(key).cloned()
     }
 
-    /// Merges differences from another environment, adding missing values.
-    pub fn get_and_set_diff(&mut self, other_env: Environment) {
-        for (key, value) in other_env.vars {
-            self.vars.entry(key).or_insert(value);
-        }
-
-        for (key, value) in other_env.identifiers {
-            self.identifiers.entry(key).or_insert(value);
-        }
+    pub fn start_trace(&mut self) {
+        self.trace = true
     }
 
-    pub fn identifier_entry(
-        &mut self,
-        key: Vec<u8>,
-    ) -> std::collections::hash_map::Entry<'_, Vec<u8>, PhpValue> {
-        self.identifiers.entry(key)
+    /// Undoes all changes made to the environment based on the `tracked_changes` field.
+    pub fn restore(&mut self) {
+        self.trace = false;
+
+
+        for key in self.tracked_changes.added_vars.iter() {
+            self.vars.remove(key);
+        }
+
+        self.tracked_changes.added_vars.clear();
+
+        for key in self.tracked_changes.added_identifiers.iter() {
+            self.identifiers.remove(key);
+        }
+
+        // TODO: Not all identifiers should be deleted, only functions, identifiers such as constants should remain.
+        self.tracked_changes.added_identifiers.clear();
+
+        for (key, value) in self.tracked_changes.modified_vars.iter() {
+			self.vars.insert(key.to_vec(), value.clone());
+		}
+
+		self.tracked_changes.modified_vars.clear();
+    }
+
+    pub fn new_ident(&mut self, ident: &[u8], value: PhpValue, span: Span) -> Option<PhpError> {
+        match self.identifiers.entry(ident.to_vec()) {
+            std::collections::hash_map::Entry::Occupied(entry) => Some(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Cannot redeclare identifier {}",
+                    get_string_from_bytes(entry.key())
+                ),
+                line: span.line,
+            }),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(value);
+
+                self.tracked_changes.added_identifiers.push(ident.to_vec());
+
+                None
+            }
+        }
     }
 }

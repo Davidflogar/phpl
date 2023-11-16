@@ -1,14 +1,16 @@
-use std::io::Result;
+use std::io::Result as IoResult;
 
 use php_parser_rs::parser;
 
-use crate::evaluator::Evaluator;
+use crate::{environment::Environment, evaluator::Evaluator};
 
 /// Evaluate the program.
-pub fn eval_program(input: &str, content: &str) -> Result<()> {
+pub fn eval_program(input: &str, content: &str) -> IoResult<()> {
     match parser::parse(content) {
         Ok(ast) => {
-            let mut evaluator = Evaluator::new();
+            let mut env = Environment::new();
+
+            let mut evaluator = Evaluator::new(&mut env);
 
             for node in ast {
                 let result = evaluator.eval_statement(node);

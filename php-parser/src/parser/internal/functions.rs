@@ -61,7 +61,7 @@ pub fn anonymous_function(state: &mut State) -> ParseResult<Expression> {
         None
     };
 
-    let parameters = parameters::function_parameter_list(state)?;
+    let parameters = parameters::function_parameter_list(state, false)?;
 
     let current = state.stream.current();
     let uses = if current.kind == TokenKind::Use {
@@ -152,7 +152,7 @@ pub fn arrow_function(state: &mut State) -> ParseResult<Expression> {
     };
 
     let attributes = state.get_attributes();
-    let parameters = parameters::function_parameter_list(state)?;
+    let parameters = parameters::function_parameter_list(state, false)?;
     let return_type = if state.stream.current().kind == TokenKind::Colon {
         Some(ReturnType {
             colon: utils::skip_colon(state)?,
@@ -199,7 +199,7 @@ pub fn function(state: &mut State) -> ParseResult<Statement> {
     // parameters will steal attributes of this function.
     let attributes = state.get_attributes();
 
-    let parameters = parameters::function_parameter_list(state)?;
+    let parameters = parameters::function_parameter_list(state, false)?;
     let return_type = if state.stream.current().kind == TokenKind::Colon {
         Some(ReturnType {
             colon: utils::skip_colon(state)?,
@@ -275,7 +275,7 @@ pub fn method(
                 body,
             }))
         } else {
-            let parameters = parameters::function_parameter_list(state)?;
+            let parameters = parameters::function_parameter_list(state, true)?;
             let semicolon = utils::skip_semicolon(state)?;
 
             Ok(Method::AbstractConstructor(AbstractConstructor {
@@ -291,7 +291,7 @@ pub fn method(
         };
     }
 
-    let parameters = parameters::function_parameter_list(state)?;
+    let parameters = parameters::function_parameter_list(state, true)?;
     let return_type = if state.stream.current().kind == TokenKind::Colon {
         Some(ReturnType {
             colon: utils::skip_colon(state)?,

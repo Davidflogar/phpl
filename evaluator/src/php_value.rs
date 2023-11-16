@@ -11,18 +11,17 @@ use php_parser_rs::parser::ast::functions::ReturnType;
 use php_parser_rs::parser::ast::variables::SimpleVariable;
 use php_parser_rs::parser::ast::{Expression, Statement};
 
-use crate::environment::Environment;
-use crate::helpers::get_string_from_bytes;
+use crate::helpers::{get_string_from_bytes, php_value_matches_type};
 
-const NULL: &str = "null";
-const BOOL: &str = "bool";
-const INT: &str = "int";
-const FLOAT: &str = "float";
-const STRING: &str = "string";
-const ARRAY: &str = "array";
-const OBJECT: &str = "object";
-const CALLABLE: &str = "callable";
-const RESOURCE: &str = "resource";
+pub const NULL: &str = "null";
+pub const BOOL: &str = "bool";
+pub const INT: &str = "int";
+pub const FLOAT: &str = "float";
+pub const STRING: &str = "string";
+pub const ARRAY: &str = "array";
+pub const OBJECT: &str = "object";
+pub const CALLABLE: &str = "callable";
+pub const RESOURCE: &str = "resource";
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -42,6 +41,10 @@ pub enum PhpValue {
 pub struct PhpError {
     pub level: ErrorLevel,
     pub message: String,
+
+    /// Note that in many parts of the program this field will be set to 0.
+    /// This is because it is another part of the program that has the line
+    /// where the error was generated and not the part that creates the structure.
     pub line: usize,
 }
 
@@ -49,7 +52,6 @@ pub struct PhpError {
 pub enum ErrorLevel {
     Fatal,
     Warning,
-    ParseError,
 
     /// A Raw error should not be formatted with get_message().
     /// And it is for private use.
@@ -80,6 +82,7 @@ pub struct PhpCallable {
     pub parameters: Vec<CallableArgument>,
     pub return_type: Option<ReturnType>,
     pub body: Vec<Statement>,
+    pub is_method: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +90,7 @@ pub struct CallableArgument {
     pub name: SimpleVariable,
     pub data_type: Option<Type>,
     pub default_value: Option<Expression>,
-    pub by_reference: bool,
+    pub pass_by_reference: bool,
     pub ellipsis: bool,
 }
 
@@ -145,7 +148,7 @@ impl PhpValue {
         }
     }
 
-    pub fn get_type(&self) -> String {
+    pub fn get_type_as_string(&self) -> String {
         match self {
             PhpValue::Null => NULL.to_string(),
             PhpValue::Bool(_) => BOOL.to_string(),
@@ -167,8 +170,8 @@ impl PhpValue {
         if self_as_string.is_none() || value_as_string.is_none() {
             let error_message = format!(
                 "Unsupported operation: {} . {}",
-                self.get_type(),
-                value.get_type()
+                self.get_type_as_string(),
+                value.get_type_as_string()
             );
 
             return Err(PhpError {
@@ -233,16 +236,16 @@ impl PhpValue {
     where
         F: Fn(f32, f32) -> f32,
     {
-        let self_type = self.get_type();
+        let self_type = self.get_type_as_string();
 
         if self_type != INT && self_type != FLOAT {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "Unsupported operation: {} {} {}",
-                    self.get_type(),
+                    self.get_type_as_string(),
                     operation_sign,
-                    rhs.get_type()
+                    rhs.get_type_as_string()
                 ),
                 line: 0,
             });
@@ -256,9 +259,9 @@ impl PhpValue {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "Unsupported operation: {} {} {}",
-                    self.get_type(),
+                    self.get_type_as_string(),
                     operation_sign,
-                    rhs.get_type()
+                    rhs.get_type_as_string()
                 ),
                 line: 0,
             });
@@ -288,13 +291,28 @@ impl PhpValue {
         }
     }
 
-    pub fn is_iterable(&self) -> bool {
-        match self {
-            PhpValue::Array(_) => true,
-            // PhpValue::Object(object) => object.is_instance_of("iterable"); TODO
-            _ => false,
-        }
-    }
+	/*
+	 * Functions to convert to a data type.
+	 */
+
+	pub fn to_int(&self) -> Option<i32> {
+		match self {
+			PhpValue::Int(i) => Some(*i),
+			PhpValue::Float(f) => Some(*f as i32),
+			PhpValue::String(s) => {
+				let str_value = std::str::from_utf8(&s.bytes).unwrap();
+
+				let int_value = str_value.parse();
+
+				if int_value.is_err() {
+					return None;
+				}
+
+				return Some(int_value.unwrap());
+			}
+			_ => None,
+		}
+	}
 }
 
 /*
@@ -336,20 +354,20 @@ impl Div for PhpValue {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "Unsupported operation: {} / {}",
-                    self.get_type(),
-                    rhs.get_type()
+                    self.get_type_as_string(),
+                    rhs.get_type_as_string()
                 ),
                 line: 0,
             });
         }
 
-		if right_to_float.unwrap() == 0.0 {
-			return Err(PhpError {
-				level: ErrorLevel::Fatal,
-				message: format!("Division by zero"),
-				line: 0,
-			});
-		}
+        if right_to_float.unwrap() == 0.0 {
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!("Division by zero"),
+                line: 0,
+            });
+        }
 
         self.perform_arithmetic_operation("/", rhs, |left, right| left / right)
     }
@@ -433,7 +451,8 @@ impl Not for PhpValue {
             PhpValue::Null => Ok(PhpValue::Bool(true)),
             PhpValue::Array(a) => Ok(PhpValue::Bool(a.len() == 0)),
             _ => {
-                let error_message = format!("Unsupported operation: !{}", self.get_type());
+                let error_message =
+                    format!("Unsupported operation: !{}", self.get_type_as_string());
 
                 Err(PhpError {
                     level: ErrorLevel::Fatal,
@@ -495,7 +514,6 @@ impl PhpError {
         let level_error = match self.level {
             ErrorLevel::Fatal => "Fatal error",
             ErrorLevel::Warning => "Warning",
-            ErrorLevel::ParseError => "Parse error",
             _ => "",
         };
 
@@ -516,12 +534,17 @@ impl From<String> for PhpError {
     }
 }
 
-impl PhpCallable {
-    pub fn call(
-        self,
-        env: Environment,
-        arguments: HashMap<&str, PhpValue>,
-    ) -> Result<PhpValue, PhpError> {
-        Ok(PhpValue::Null)
+impl CallableArgument {
+    /// Check that `arg` is valid for this argument.
+    pub fn is_valid(&self, arg: &PhpValue, called_in_line: usize) -> Option<PhpError> {
+        let self_has_type = &self.data_type;
+
+        if self_has_type.is_some() {
+            let self_type = self_has_type.as_ref().unwrap();
+
+            return php_value_matches_type(self_type, arg, called_in_line);
+        }
+
+        None
     }
 }

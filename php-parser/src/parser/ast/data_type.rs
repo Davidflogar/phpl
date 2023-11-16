@@ -9,6 +9,8 @@ use std::fmt::Display;
 use crate::lexer::byte_string::ByteString;
 use crate::lexer::token::Span;
 use crate::node::Node;
+use crate::parser::error;
+use crate::parser::error::ParseError;
 
 #[derive(Debug, PartialEq, Eq, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", content = "value")]
@@ -95,6 +97,81 @@ impl Type {
             Type::StaticReference(span) => *span,
             Type::SelfReference(span) => *span,
             Type::ParentReference(span) => *span,
+        }
+    }
+
+    pub fn is_valid_argument_type(&self, class_context: bool) -> Option<ParseError> {
+        match &self {
+            Type::Named(_, _) => None,
+            Type::Nullable(_, data_type) => data_type.is_valid_argument_type(class_context),
+            Type::Union(inner) => {
+                for t in inner {
+                    if let Some(e) = t.is_valid_argument_type(class_context) {
+                        return Some(e);
+                    }
+                }
+
+                None
+            }
+            Type::Intersection(intersection) => {
+                for t in intersection {
+                    if let Some(e) = t.is_valid_argument_type(class_context) {
+                        return Some(e);
+                    }
+                }
+
+                None
+            }
+            Type::Void(span) => Some(error::type_cannot_be_used_as_a_parameter_type(
+                *span,
+                "void".to_string(),
+            )),
+            Type::Null(_) => None,
+            Type::True(_) => None,
+            Type::False(_) => None,
+            Type::Never(span) => Some(error::type_cannot_be_used_as_a_parameter_type(
+                *span,
+                "never".to_string(),
+            )),
+            Type::Float(_) => None,
+            Type::Boolean(_) => None,
+            Type::Integer(_) => None,
+            Type::String(_) => None,
+            Type::Array(_) => None,
+            Type::Object(_) => None,
+            Type::Mixed(_) => None,
+            Type::Callable(_) => None,
+            Type::Iterable(_) => None,
+            Type::StaticReference(span) => {
+                if class_context {
+                    None
+                } else {
+                    Some(error::cannot_use_type_when_no_class_scope_is_active(
+                        *span,
+                        "static".to_string(),
+                    ))
+                }
+            }
+            Type::SelfReference(span) => {
+                if class_context {
+                    None
+                } else {
+                    Some(error::cannot_use_type_when_no_class_scope_is_active(
+                        *span,
+                        "self".to_string(),
+                    ))
+                }
+            }
+            Type::ParentReference(span) => {
+                if class_context {
+                    None
+                } else {
+                    Some(error::cannot_use_type_when_no_class_scope_is_active(
+                        *span,
+                        "parent".to_string(),
+                    ))
+                }
+            }
         }
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::{fs, str};
 
@@ -17,6 +16,7 @@ use php_parser_rs::{
     },
 };
 
+use crate::expressions::function_call;
 use crate::helpers::{get_string_from_bytes, parse_php_file};
 use crate::php_value::{CallableArgument, PhpCallable};
 use crate::{
@@ -27,7 +27,7 @@ use crate::{
 
 const NULL: PhpValue = PhpValue::Null;
 
-pub struct Evaluator {
+pub struct Evaluator<'a> {
     /// The output of the evaluated code
     pub output: String,
 
@@ -37,8 +37,7 @@ pub struct Evaluator {
     /// Whether the PHP code must die
     pub die: bool,
 
-    /// The environment of the code
-    pub env: Environment,
+    pub env: &'a mut Environment,
 
     pub warnings: Vec<PhpError>,
 
@@ -46,32 +45,22 @@ pub struct Evaluator {
     pub required_files: Vec<String>,
 }
 
-impl Evaluator {
-    pub fn new() -> Evaluator {
+impl<'a> Evaluator<'a> {
+    pub fn new(env: &'a mut Environment) -> Evaluator<'a> {
         Evaluator {
             output: String::new(),
             php_open: false,
             die: false,
-            env: Environment::new(),
+            env,
             warnings: vec![],
             included_files: vec![],
             required_files: vec![],
         }
     }
 
-    /// Returns a new child evaluator based on the current evaluator.
-    ///
-    /// This is only used with include and require statements.
-    pub fn new_child(&self) -> Evaluator {
-        Evaluator {
-            output: String::new(),
-            php_open: false,
-            die: false,
-            env: self.env.clone(),
-            warnings: vec![],
-            included_files: vec![],
-            required_files: vec![],
-        }
+    /// Appends the given output to the current evaluator's output.
+    pub fn add_output(&mut self, output: &str) {
+        self.output.push_str(output)
     }
 
     pub fn eval_statement(&mut self, node: Statement) -> Result<PhpValue, PhpError> {
@@ -87,7 +76,7 @@ impl Evaluator {
                 Ok(NULL)
             }
             Statement::InlineHtml(html) => {
-                self.output += html.html.to_string().as_str();
+                self.add_output(&get_string_from_bytes(&html.html.bytes));
 
                 Ok(NULL)
             }
@@ -111,15 +100,15 @@ impl Evaluator {
                             level: ErrorLevel::Warning,
                             message: format!(
                                 "{} to string conversion failed.",
-                                expression_result.get_type()
+                                expression_result.get_type_as_string()
                             ),
                             line: echo.echo.line,
                         });
 
-                        self.output += expression_result.get_type().as_str();
+                        self.add_output(expression_result.get_type_as_string().as_str())
                     }
 
-                    self.output += expression_as_string.unwrap_or("".to_string()).as_str();
+                    self.add_output(expression_as_string.unwrap_or("".to_string()).as_str());
                 }
 
                 Ok(NULL)
@@ -131,7 +120,7 @@ impl Evaluator {
                     callable_args.push(CallableArgument {
                         name: arg.name,
                         data_type: arg.data_type,
-                        by_reference: arg.ampersand.is_some(),
+                        pass_by_reference: arg.ampersand.is_some(),
                         default_value: arg.default,
                         ellipsis: arg.ellipsis.is_some(),
                     });
@@ -145,9 +134,10 @@ impl Evaluator {
                     parameters: callable_args,
                     return_type: func.return_type,
                     body: func.body.statements,
+                    is_method: false,
                 };
 
-                let set_identifier = self.set_identifier(
+                let set_identifier = self.env.new_ident(
                     &func.name.value.bytes,
                     PhpValue::Callable(php_callable),
                     func.function,
@@ -166,7 +156,7 @@ impl Evaluator {
         }
     }
 
-    fn eval_expression(&mut self, expr: &Expression) -> Result<PhpValue, PhpError> {
+    pub fn eval_expression(&mut self, expr: &Expression) -> Result<PhpValue, PhpError> {
         match expr {
             Expression::Eval(_) => todo!(),
             Expression::Empty(ee) => {
@@ -183,14 +173,14 @@ impl Evaluator {
 
                         PhpValue::Bool(false)
                     }
-					PhpValue::String(s) => {
-						let string = get_string_from_bytes(&s.bytes);
+                    PhpValue::String(s) => {
+                        let string = get_string_from_bytes(&s.bytes);
 
-						PhpValue::Bool(string == "" || string == "0")
-					}
-					PhpValue::Float(f) => PhpValue::Bool(f == 0.0),
-					PhpValue::Int(i) => PhpValue::Bool(i == 0),
-					PhpValue::Array(a) => PhpValue::Bool(a.len() > 0),
+                        PhpValue::Bool(string == "" || string == "0")
+                    }
+                    PhpValue::Float(f) => PhpValue::Bool(f == 0.0),
+                    PhpValue::Int(i) => PhpValue::Bool(i == 0),
+                    PhpValue::Array(a) => PhpValue::Bool(a.len() > 0),
                     _ => PhpValue::Bool(false),
                 };
 
@@ -209,26 +199,26 @@ impl Evaluator {
             Expression::Isset(ie) => {
                 let variables = &ie.variables;
 
-				for var in variables {
-					let var_name = self.get_variable_name(var)?;
+                for var in variables {
+                    let var_name = self.get_variable_name(var)?;
 
-					let var_exists = self.env.get_var(&var_name);
+                    let var_exists = self.env.get_var(&var_name);
 
-					if var_exists.is_none() {
-						return Ok(PhpValue::Bool(false));
-					}
-				}
+                    if var_exists.is_none() {
+                        return Ok(PhpValue::Bool(false));
+                    }
+                }
 
                 Ok(PhpValue::Bool(true))
             }
             Expression::Unset(ue) => {
                 let args = &ue.variables;
 
-				for arg in args {
-					let var_name = self.get_variable_name(arg)?;
+                for arg in args {
+                    let var_name = self.get_variable_name(arg)?;
 
-					self.env.delete_var(&var_name);
-				}
+                    self.env.delete_var(&var_name);
+                }
 
                 Ok(NULL)
             }
@@ -243,14 +233,17 @@ impl Evaluator {
                     if value_as_string.is_none() {
                         self.warnings.push(PhpError {
                             level: ErrorLevel::Warning,
-                            message: format!("{} to string conversion failed.", value.get_type()),
+                            message: format!(
+                                "{} to string conversion failed.",
+                                value.get_type_as_string()
+                            ),
                             line: pe.print.line,
                         });
 
-                        return Ok(PhpValue::String(value.get_type().into()));
+                        return Ok(PhpValue::String(value.get_type_as_string().into()));
                     }
 
-                    self.output += value_as_string.unwrap().as_str();
+                    self.add_output(value_as_string.unwrap().as_str());
                 } else if pe.argument.is_some() {
                     let arg = *pe.argument.clone().unwrap();
 
@@ -261,14 +254,17 @@ impl Evaluator {
                     if value_as_string.is_none() {
                         self.warnings.push(PhpError {
                             level: ErrorLevel::Warning,
-                            message: format!("{} to string conversion failed.", value.get_type()),
+                            message: format!(
+                                "{} to string conversion failed.",
+                                value.get_type_as_string()
+                            ),
                             line: pe.print.line,
                         });
 
-                        return Ok(PhpValue::String(value.get_type().into()));
+                        return Ok(PhpValue::String(value.get_type_as_string().into()));
                     }
 
-                    self.output += value_as_string.unwrap().as_str();
+                    self.add_output(value_as_string.unwrap().as_str());
                 }
 
                 Ok(NULL)
@@ -303,7 +299,11 @@ impl Evaluator {
 
                     self.php_value_or_die(minus, left_value - right_value)
                 }
-                ArithmeticOperationExpression::Multiplication { left, asterisk, right } => {
+                ArithmeticOperationExpression::Multiplication {
+                    left,
+                    asterisk,
+                    right,
+                } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
@@ -315,7 +315,11 @@ impl Evaluator {
 
                     self.php_value_or_die(slash, left_value / right_value)
                 }
-                ArithmeticOperationExpression::Modulo { left, percent, right } => {
+                ArithmeticOperationExpression::Modulo {
+                    left,
+                    percent,
+                    right,
+                } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
@@ -359,34 +363,22 @@ impl Evaluator {
                 }
             },
             Expression::AssignmentOperation(operation) => match operation {
-                AssignmentOperationExpression::Assign {
-                    left,
-                    equals,
-                    right,
-                } => {
+                AssignmentOperationExpression::Assign { left, right, .. } => {
                     let Expression::Variable(ref left_var) = **left else {
-						return Err(PhpError {
-							level: ErrorLevel::ParseError,
-							message: "Only variables can be assigned".to_string(),
-							line: equals.line
-						});
+						unreachable!()
 					};
 
                     let left_var_name = self.get_variable_name(&left_var)?;
 
                     if let Expression::Reference(ref reference) = **right {
                         let Expression::Variable(ref right_var) = *reference.right else {
-							return Err(PhpError {
-								level: ErrorLevel::ParseError,
-								message: "References must be to variables".to_string(),
-								line: reference.ampersand.line
-							});
+							unreachable!()
 						};
 
                         let right_var_name = self.get_variable_name(&right_var)?;
 
                         if !self.env.var_exists(&right_var_name) {
-                            self.env.set_var(&right_var_name, &NULL)
+                            self.env.insert_var(&right_var_name, &NULL)
                         }
 
                         let right_value = self
@@ -397,14 +389,14 @@ impl Evaluator {
 
                         let cloned_right_value = Rc::clone(&right_value);
 
-                        self.env.set_var_rc(&left_var_name, cloned_right_value);
+                        self.env.insert_var_rc(&left_var_name, cloned_right_value);
 
                         return Ok(right_value.borrow().clone());
                     } else {
                         let right_value = self.eval_expression(&right)?;
 
                         if !self.env.var_exists(&left_var_name) {
-                            self.env.set_var(&left_var_name, &right_value);
+                            self.env.insert_var(&left_var_name, &right_value);
                         } else {
                             let old_value = self.env.get_var_with_rc(&left_var_name).unwrap();
 
@@ -499,13 +491,21 @@ impl Evaluator {
 
                     self.php_value_or_die(xor, left_value ^ right_value)
                 }
-                BitwiseOperationExpression::LeftShift { left, left_shift, right} => {
+                BitwiseOperationExpression::LeftShift {
+                    left,
+                    left_shift,
+                    right,
+                } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
                     self.php_value_or_die(left_shift, left_value << right_value)
                 }
-                BitwiseOperationExpression::RightShift { left, right_shift, right } => {
+                BitwiseOperationExpression::RightShift {
+                    left,
+                    right_shift,
+                    right,
+                } => {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
@@ -528,7 +528,7 @@ impl Evaluator {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    if left_value.get_type() != right_value.get_type() {
+                    if left_value.get_type_as_string() != right_value.get_type_as_string() {
                         PhpValue::Bool(false);
                     }
 
@@ -550,7 +550,7 @@ impl Evaluator {
                     let left_value = self.eval_expression(&left)?;
                     let right_value = self.eval_expression(&right)?;
 
-                    if left_value.get_type() != right_value.get_type() {
+                    if left_value.get_type_as_string() != right_value.get_type_as_string() {
                         PhpValue::Bool(true);
                     }
 
@@ -658,7 +658,7 @@ impl Evaluator {
 					let error =
 						format!(
 							"Left side of instanceof must be an object, got {}",
-							left_expr_value.get_type()
+							left_expr_value.get_type_as_string()
 						);
 
 					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: instanceof.instanceof.line });
@@ -673,15 +673,7 @@ impl Evaluator {
                     Err(error) => self.eval_error(error),
                 }
             }
-            Expression::Reference(reference) => {
-                let error = format!("Unexpected reference expression",);
-
-                Err(PhpError {
-                    level: ErrorLevel::ParseError,
-                    message: error,
-                    line: reference.ampersand.line,
-                })
-            }
+            Expression::Reference(_) => unreachable!(),
             Expression::Parenthesized(parenthesized) => self.eval_expression(&parenthesized.expr),
             Expression::ErrorSuppress(error_expression) => {
                 let old_php_die = self.die;
@@ -700,10 +692,10 @@ impl Evaluator {
                 Identifier::SimpleIdentifier(simple_identifier) => {
                     let identifier_name = &simple_identifier.value;
 
-                    let expr = self.env.get_identifier(identifier_name);
+                    let expr = self.env.get_ident(identifier_name);
 
                     if expr.is_some() {
-                        Ok(expr.unwrap())
+                        Ok(expr.unwrap().clone())
                     } else {
                         let error = format!("Identifier {} not found", identifier_name,);
 
@@ -729,58 +721,7 @@ impl Evaluator {
             Expression::RequireOnce(require) => {
                 self.handle_require(&require.path, true, require.require_once)
             }
-            Expression::FunctionCall(call) => {
-                let target = self.eval_expression(&call.target)?;
-
-                let target_name = target.to_string();
-
-                if target_name.is_none() {
-                    self.warnings.push(PhpError {
-                        level: ErrorLevel::Warning,
-                        message: format!("{} to string conversion failed", target.get_type()),
-                        line: call.arguments.left_parenthesis.line,
-                    });
-                }
-
-                let target_name = target_name.unwrap_or("".to_string());
-
-                let target_name_as_vec = target_name.as_bytes().to_vec();
-
-                let function_option = self.env.get_identifier(&target_name_as_vec);
-
-                if function_option.is_none() {
-                    let error = format!("Function {} not found", target_name);
-
-                    return Err(PhpError {
-                        level: ErrorLevel::Fatal,
-                        message: error,
-                        line: call.arguments.left_parenthesis.line,
-                    });
-                }
-
-                let PhpValue::Callable(function) = function_option.unwrap() else {
-					let error = format!("Function {} is not callable", target_name);
-
-					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: call.arguments.left_parenthesis.line });
-				};
-
-                // parse the arguments
-                if call.arguments.arguments.len() > function.parameters.len() {
-                    let error = format!(
-                        "Too many arguments to function {}, expected {}",
-                        target_name,
-                        function.parameters.len()
-                    );
-
-                    return Err(PhpError {
-                        level: ErrorLevel::Fatal,
-                        message: error,
-                        line: call.arguments.left_parenthesis.line,
-                    });
-                }
-
-                function.call(self.env.clone(), HashMap::new())
-            }
+            Expression::FunctionCall(call) => function_call::function_call(self, call),
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
         }
@@ -794,21 +735,21 @@ impl Evaluator {
         self.die = true;
     }
 
-	/// Check that `value` is PhpValue, if it is not it returns the error.
-	///
-	/// It is used with arithmetic operations and logical operations.
+    /// Check that `value` is PhpValue, if it is not it returns the error.
+    ///
+    /// It is used with arithmetic operations and logical operations.
     fn php_value_or_die(
         &mut self,
-		span: &Span,
+        span: &Span,
         value: Result<PhpValue, PhpError>,
     ) -> Result<PhpValue, PhpError> {
         match value {
             Ok(value) => Ok(value),
             Err(mut error) => {
-				error.line = span.line;
+                error.line = span.line;
 
-				Err(error)
-			},
+                Err(error)
+            }
         }
     }
 
@@ -823,7 +764,7 @@ impl Evaluator {
                 } else {
                     let error = format!(
                         "Variable variable must be a string, got {}",
-                        value.get_type(),
+                        value.get_type_as_string(),
                     );
 
                     Err(PhpError {
@@ -841,7 +782,10 @@ impl Evaluator {
                 if expr_as_string.is_none() {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
-                        message: format!("{} to string conversion failed", expr_value.get_type()),
+                        message: format!(
+                            "{} to string conversion failed",
+                            expr_value.get_type_as_string()
+                        ),
                         line: bvv.start.line,
                     });
 
@@ -897,7 +841,7 @@ impl Evaluator {
                         level: ErrorLevel::Warning,
                         message: format!(
                             "Braced variable variable must be a string, got {}",
-                            expr_value.get_type(),
+                            expr_value.get_type_as_string(),
                         ),
                         line: bvv.start.line,
                     });
@@ -941,11 +885,7 @@ impl Evaluator {
         let right_value = self.eval_expression(&right)?;
 
         let Expression::Variable(ref var) = **left else {
-            return Err(PhpError {
-				level: ErrorLevel::ParseError,
-				message: "Only variables can be assigned".to_string(),
-				line: span.line,
-			});
+			unreachable!()
         };
 
         let var_name = self.get_variable_name(&var)?;
@@ -988,7 +928,7 @@ impl Evaluator {
         }?;
 
         if !self.env.var_exists(&var_name) {
-            self.env.set_var(&var_name, &new_value);
+            self.env.insert_var(&var_name, &new_value);
         } else {
             let old_value = self.env.get_var_with_rc(&var_name).unwrap();
 
@@ -1027,7 +967,6 @@ impl Evaluator {
 
                 Ok(NULL)
             }
-            ErrorLevel::ParseError => Err(error),
             ErrorLevel::Raw => Err(error),
         }
     }
@@ -1045,7 +984,7 @@ impl Evaluator {
         if path_as_string.is_none() {
             self.warnings.push(PhpError {
                 level: ErrorLevel::Warning,
-                message: format!("{} to string conversion failed", path.get_type(),),
+                message: format!("{} to string conversion failed", path.get_type_as_string(),),
                 line: span.line,
             });
         }
@@ -1105,7 +1044,7 @@ impl Evaluator {
         if path_as_string.is_none() {
             self.warnings.push(PhpError {
                 level: ErrorLevel::Warning,
-                message: format!("{} to string conversion failed", path.get_type(),),
+                message: format!("{} to string conversion failed", path.get_type_as_string(),),
                 line: span.line,
             });
         }
@@ -1150,28 +1089,5 @@ impl Evaluator {
         self.required_files.push(real_path.clone());
 
         parse_php_file(self, &real_path, &content.unwrap())
-    }
-
-    pub fn set_identifier(
-        &mut self,
-        ident: &[u8],
-        value: PhpValue,
-        span: Span,
-    ) -> Option<PhpError> {
-        match self.env.identifier_entry(ident.to_vec()) {
-            std::collections::hash_map::Entry::Occupied(entry) => Some(PhpError {
-                level: ErrorLevel::Fatal,
-                message: format!(
-                    "Cannot redeclare identifier {}",
-                    get_string_from_bytes(entry.key())
-                ),
-                line: span.line,
-            }),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(value);
-
-                None
-            }
-        }
     }
 }

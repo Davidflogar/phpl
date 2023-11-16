@@ -1007,9 +1007,35 @@ pub fn cannot_use_unset_on_expression_result(span: Span, current_span: Span) -> 
     let message = "Cannot use unset() on the result of an expression";
 
     ParseError::new("E054".to_string(), message, span).error(
-		"variable/s were expected as argument",
+        "variable/s were expected as argument",
         span.position,
-		current_span.position - span.position,
+        current_span.position - span.position,
+    )
+}
+
+pub fn type_cannot_be_used_as_a_parameter_type(span: Span, ty: String) -> ParseError {
+    ParseError::new(
+        "E055".to_string(),
+        format!("{} cannot be used as a parameter type", ty),
+        span,
+    )
+    .error(
+        format!("Type '{}' cannot be used in this context", ty),
+        span.position,
+        ty.len(),
+    )
+}
+
+pub fn cannot_use_type_when_no_class_scope_is_active(span: Span, ty: String) -> ParseError {
+    ParseError::new(
+        "E055".to_string(),
+        format!("Cannot use \"{}\" when no class scope is active", ty),
+        span,
+    )
+    .error(
+        format!("Type '{}' cannot be used in this context", ty),
+        span.position,
+        ty.len(),
     )
 }
 

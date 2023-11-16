@@ -18,7 +18,7 @@ use crate::parser::internal::utils;
 use crate::parser::internal::variables;
 use crate::parser::state::State;
 
-pub fn function_parameter_list(state: &mut State) -> Result<FunctionParameterList, ParseError> {
+pub fn function_parameter_list(state: &mut State, class_context: bool) -> Result<FunctionParameterList, ParseError> {
     let comments = state.stream.comments();
     let left_parenthesis = utils::skip_left_parenthesis(state)?;
     let parameters = utils::comma_separated(
@@ -27,6 +27,16 @@ pub fn function_parameter_list(state: &mut State) -> Result<FunctionParameterLis
             attributes::gather_attributes(state)?;
 
             let ty = data_type::optional_data_type(state)?;
+
+            if ty.is_some() {
+                let ty_some = ty.clone().unwrap();
+
+				let is_not_valid = ty_some.is_valid_argument_type(class_context);
+
+                if is_not_valid.is_some() {
+                    return Err(is_not_valid.unwrap());
+                }
+            }
 
             let mut current = state.stream.current();
             let ampersand = if current.kind == TokenKind::Ampersand {
@@ -261,8 +271,8 @@ pub fn single_argument(
             )));
         }
 
-		// get the argument as positional
-		let Argument::Positional(argument) = arg else {
+        // get the argument as positional
+        let Argument::Positional(argument) = arg else {
 			unreachable!()
 		};
 
@@ -347,8 +357,6 @@ fn argument(state: &mut State) -> ParseResult<(bool, Option<Span>, Argument)> {
 }
 
 /// A clone of `argument_list` with additional restrictions on the parameters.
-pub fn argument_list_with_positional_parameters(
-    state: &mut State,
-) -> ParseResult<ArgumentList> {
+pub fn argument_list_with_positional_parameters(state: &mut State) -> ParseResult<ArgumentList> {
     parse_argument_list(state, true)
 }
