@@ -1,3 +1,4 @@
 - FunctionCall expression
 - Add exceptions instead of stopping the program with any fatal error
 - Pass and return by reference in functions
+- Validate the data types that are supported in an Intersection (from the parser)

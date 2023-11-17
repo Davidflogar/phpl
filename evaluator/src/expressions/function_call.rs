@@ -95,16 +95,15 @@ pub fn function_call(
         }
 
         // iterate over the positional arguments and check if they are valid
-        for i in 0..positional_arguments.len() {
+        for (i, mut positional_arg) in positional_arguments.into_iter().enumerate() {
             if i > function.parameters.len() - 1 {
                 break;
             }
 
-            let positional_arg = &positional_arguments[i];
             let self_arg = &function.parameters[i];
 
             // validate the argument
-            let is_not_valid = self_arg.is_valid(positional_arg, called_in_line);
+            let is_not_valid = self_arg.is_valid(&mut positional_arg, called_in_line);
 
             if is_not_valid.is_some() {
                 let mut error = is_not_valid.unwrap();

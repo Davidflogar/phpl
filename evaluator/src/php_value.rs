@@ -536,7 +536,7 @@ impl From<String> for PhpError {
 
 impl CallableArgument {
     /// Check that `arg` is valid for this argument.
-    pub fn is_valid(&self, arg: &PhpValue, called_in_line: usize) -> Option<PhpError> {
+    pub fn is_valid(&self, arg: &mut PhpValue, called_in_line: usize) -> Option<PhpError> {
         let self_has_type = &self.data_type;
 
         if self_has_type.is_some() {
