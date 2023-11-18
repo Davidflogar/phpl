@@ -18,12 +18,15 @@ use crate::parser::internal::utils;
 use crate::parser::internal::variables;
 use crate::parser::state::State;
 
-pub fn function_parameter_list(state: &mut State, class_context: bool) -> Result<FunctionParameterList, ParseError> {
+pub fn function_parameter_list(
+    state: &mut State,
+    class_context: bool,
+) -> Result<FunctionParameterList, ParseError> {
     let comments = state.stream.comments();
     let left_parenthesis = utils::skip_left_parenthesis(state)?;
-    let parameters = utils::comma_separated(
+    let parameters = utils::comma_separated_with_persistent_value(
         state,
-        &|state| {
+        &|state, has_used_ellipsis| {
             attributes::gather_attributes(state)?;
 
             let ty = data_type::optional_data_type(state)?;
@@ -31,7 +34,7 @@ pub fn function_parameter_list(state: &mut State, class_context: bool) -> Result
             if ty.is_some() {
                 let ty_some = ty.clone().unwrap();
 
-				let is_not_valid = ty_some.is_valid_argument_type(class_context);
+                let is_not_valid = ty_some.is_valid_argument_type(class_context);
 
                 if is_not_valid.is_some() {
                     return Err(is_not_valid.unwrap());
@@ -39,6 +42,7 @@ pub fn function_parameter_list(state: &mut State, class_context: bool) -> Result
             }
 
             let mut current = state.stream.current();
+
             let ampersand = if current.kind == TokenKind::Ampersand {
                 state.stream.next();
                 current = state.stream.current();
@@ -47,8 +51,16 @@ pub fn function_parameter_list(state: &mut State, class_context: bool) -> Result
                 None
             };
 
+            let mut used_ellipsis_before_this_arg = false;
+
             let ellipsis = if current.kind == TokenKind::Ellipsis {
                 state.stream.next();
+
+                if *has_used_ellipsis {
+                    used_ellipsis_before_this_arg = true;
+                }
+
+                *has_used_ellipsis = true;
 
                 Some(current.span)
             } else {
@@ -62,6 +74,13 @@ pub fn function_parameter_list(state: &mut State, class_context: bool) -> Result
             if state.stream.current().kind == TokenKind::Equals {
                 state.stream.next();
                 default = Some(expressions::create(state)?);
+            }
+
+            if used_ellipsis_before_this_arg {
+                return Err(error::only_the_last_parameter_can_be_variadic(
+					current.span,
+					state.stream.current().span,
+				));
             }
 
             Ok(FunctionParameter {

@@ -1039,6 +1039,19 @@ pub fn cannot_use_type_when_no_class_scope_is_active(span: Span, ty: String) -> 
     )
 }
 
+pub fn only_the_last_parameter_can_be_variadic(span: Span, next: Span) -> ParseError {
+    ParseError::new(
+        "E056".to_string(),
+        "only the last parameter can be variadic",
+        span,
+    )
+    .error(
+        "try removing this parameter",
+        span.position,
+    	next.position - span.position,
+    )
+}
+
 impl From<SyntaxError> for ParseError {
     fn from(e: SyntaxError) -> Self {
         Self {

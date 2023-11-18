@@ -16,12 +16,14 @@ use php_parser_rs::{
     },
 };
 
+use crate::errors::cannot_use_type_as_default_value_for_parameter_default_of_type;
 use crate::expressions::function_call;
-use crate::helpers::{get_string_from_bytes, parse_php_file};
+use crate::helpers::callable_helpers::php_value_matches_type;
+use crate::helpers::helpers::{get_string_from_bytes, parse_php_file};
 use crate::php_value::{CallableArgument, PhpCallable};
 use crate::{
     environment::Environment,
-    helpers::get_span_from_var,
+    helpers::helpers::get_span_from_var,
     php_value::{ErrorLevel, PhpError, PhpValue},
 };
 
@@ -117,11 +119,36 @@ impl<'a> Evaluator<'a> {
                 let mut callable_args: Vec<CallableArgument> = vec![];
 
                 for arg in func.parameters {
+                    let mut default_value: Option<PhpValue> = None;
+
+                    if arg.default.is_some() && arg.data_type.is_some() {
+                        let mut default_expression = self.eval_expression(&arg.default.unwrap())?;
+                        let default_data_type = arg.data_type.clone().unwrap();
+
+                        // TODO: The data type conversion should not be done in this case
+                        // and only the actual data type should be accepted.
+                        let is_not_valid =
+                            php_value_matches_type(&default_data_type, &mut default_expression, 0);
+
+                        if is_not_valid.is_some() {
+                            return Err(
+                                cannot_use_type_as_default_value_for_parameter_default_of_type(
+                                    default_expression.get_type_as_string(),
+                                    get_string_from_bytes(&arg.name.name.bytes),
+                                    default_data_type.to_string(),
+                                    default_data_type.first_span().line,
+                                ),
+                            );
+                        }
+
+						default_value = Some(default_expression);
+                    }
+
                     callable_args.push(CallableArgument {
                         name: arg.name,
                         data_type: arg.data_type,
                         pass_by_reference: arg.ampersand.is_some(),
-                        default_value: arg.default,
+                        default_value: default_value,
                         ellipsis: arg.ellipsis.is_some(),
                     });
                 }

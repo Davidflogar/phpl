@@ -9,9 +9,10 @@ use php_parser_rs::parser::ast::attributes::AttributeGroup;
 use php_parser_rs::parser::ast::data_type::Type;
 use php_parser_rs::parser::ast::functions::ReturnType;
 use php_parser_rs::parser::ast::variables::SimpleVariable;
-use php_parser_rs::parser::ast::{Expression, Statement};
+use php_parser_rs::parser::ast::Statement;
 
-use crate::helpers::{get_string_from_bytes, php_value_matches_type};
+use crate::helpers::callable_helpers::php_value_matches_type;
+use crate::helpers::helpers::get_string_from_bytes;
 
 pub const NULL: &str = "null";
 pub const BOOL: &str = "bool";
@@ -89,36 +90,12 @@ pub struct PhpCallable {
 pub struct CallableArgument {
     pub name: SimpleVariable,
     pub data_type: Option<Type>,
-    pub default_value: Option<Expression>,
+    pub default_value: Option<PhpValue>,
     pub pass_by_reference: bool,
     pub ellipsis: bool,
 }
 
 impl PhpValue {
-    pub fn to_string(&self) -> Option<String> {
-        match self {
-            PhpValue::Null => Some("NULL".to_string()),
-            PhpValue::Bool(b) => {
-                if *b {
-                    Some("1".to_string())
-                } else {
-                    Some("".to_string())
-                }
-            }
-            PhpValue::Int(i) => Some(i.to_string()),
-            PhpValue::Float(f) => Some(f.to_string()),
-            PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
-            PhpValue::Array(_) => None,
-            PhpValue::Object(_) => None,
-            PhpValue::Callable(c) => {
-                let name = get_string_from_bytes(&c.name.bytes);
-
-                Some(name)
-            }
-            PhpValue::Resource(_) => Some("Resource".to_string()),
-        }
-    }
-
     /// Performs a power operation on two values.
     pub fn pow(self, value: PhpValue) -> Result<PhpValue, PhpError> {
         match (self, value) {
@@ -208,25 +185,6 @@ impl PhpValue {
         }
     }
 
-    pub fn to_float(&self) -> Option<f32> {
-        match self {
-            PhpValue::Int(i) => Some(*i as f32),
-            PhpValue::Float(f) => Some(*f),
-            PhpValue::String(s) => {
-                let str_value = std::str::from_utf8(&s.bytes).unwrap();
-
-                let float_value = str_value.parse();
-
-                if float_value.is_err() {
-                    return None;
-                }
-
-                return Some(float_value.unwrap());
-            }
-            _ => None,
-        }
-    }
-
     fn perform_arithmetic_operation<F>(
         &self,
         operation_sign: &str,
@@ -291,28 +249,75 @@ impl PhpValue {
         }
     }
 
-	/*
-	 * Functions to convert to a data type.
-	 */
-
-	pub fn to_int(&self) -> Option<i32> {
+	pub fn is_iterable(&self) -> bool {
 		match self {
-			PhpValue::Int(i) => Some(*i),
-			PhpValue::Float(f) => Some(*f as i32),
-			PhpValue::String(s) => {
-				let str_value = std::str::from_utf8(&s.bytes).unwrap();
-
-				let int_value = str_value.parse();
-
-				if int_value.is_err() {
-					return None;
-				}
-
-				return Some(int_value.unwrap());
-			}
-			_ => None,
+			PhpValue::Array(_) => true,
+			// TODO: PhpValue::Object(o) => o.is_instance_of("iterable"),
+			_ => false,
 		}
 	}
+
+    /*
+     * Functions to convert to a data type.
+     */
+
+    pub fn to_int(&self) -> Option<i32> {
+        match self {
+            PhpValue::Int(i) => Some(*i),
+            PhpValue::Float(f) => Some(*f as i32),
+            PhpValue::String(s) => {
+                let str_value = std::str::from_utf8(&s.bytes).unwrap();
+
+                let int_value = str_value.parse();
+
+                if int_value.is_err() {
+                    return None;
+                }
+
+                return Some(int_value.unwrap());
+            }
+            _ => None,
+        }
+    }
+
+    pub fn to_float(&self) -> Option<f32> {
+        match self {
+            PhpValue::Int(i) => Some(*i as f32),
+            PhpValue::Float(f) => Some(*f),
+            PhpValue::String(s) => {
+                let str_value = std::str::from_utf8(&s.bytes).unwrap();
+
+                let float_value = str_value.parse();
+
+                if float_value.is_err() {
+                    return None;
+                }
+
+                return Some(float_value.unwrap());
+            }
+            _ => None,
+        }
+    }
+
+    pub fn to_string(&self) -> Option<String> {
+        match self {
+            PhpValue::Null => Some("NULL".to_string()),
+            PhpValue::Bool(b) => {
+                if *b {
+                    Some("1".to_string())
+                } else {
+                    Some("".to_string())
+                }
+            }
+            PhpValue::Int(i) => Some(i.to_string()),
+            PhpValue::Float(f) => Some(f.to_string()),
+            PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
+            PhpValue::Array(_) => None,
+            PhpValue::Object(_) => None,
+            PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name.bytes)),
+            PhpValue::Resource(_) => Some("Resource".to_string()),
+        }
+    }
 }
 
 /*

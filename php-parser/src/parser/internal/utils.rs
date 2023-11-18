@@ -168,6 +168,38 @@ pub fn comma_separated<T>(
     Ok(CommaSeparated { inner, commas })
 }
 
+/// Same as `comma_separated`, but allows a persistent value which
+/// may be used for some operations.
+///
+/// Such as keeping track of whether an ellipsis has been used before.
+pub fn comma_separated_with_persistent_value<T>(
+    state: &mut State,
+    func: &(dyn Fn(&mut State, &mut bool) -> ParseResult<T>),
+    until: TokenKind,
+) -> ParseResult<CommaSeparated<T>> {
+    let mut inner: Vec<T> = vec![];
+    let mut commas: Vec<Span> = vec![];
+    let mut current = state.stream.current();
+	let mut persistent = false;
+
+    while current.kind != until {
+        inner.push(func(state, &mut persistent)?);
+
+        current = state.stream.current();
+        if current.kind != TokenKind::Comma {
+            break;
+        }
+
+        commas.push(current.span);
+
+        state.stream.next();
+
+        current = state.stream.current();
+    }
+
+    Ok(CommaSeparated { inner, commas })
+}
+
 /// Parse a comma-separated list of items, not allowing trailing commas.
 pub fn comma_separated_no_trailing<T>(
     state: &mut State,

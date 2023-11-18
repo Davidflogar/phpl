@@ -4,7 +4,7 @@ use php_parser_rs::parser::ast::{arguments::Argument, FunctionCallExpression};
 
 use crate::{
     evaluator::Evaluator,
-    helpers::get_string_from_bytes,
+    helpers::helpers::get_string_from_bytes,
     php_value::{CallableArgument, ErrorLevel, PhpError, PhpValue},
 };
 
@@ -55,23 +55,12 @@ pub fn function_call(
     let mut final_function_parameters: HashMap<Vec<u8>, PhpValue> = HashMap::new();
 
     if function.parameters.len() != 0 {
-        // get the non optional arguments
-        let mut non_optional_arguments: Vec<&CallableArgument> = vec![];
+        let mut required_arguments: Vec<&CallableArgument> = vec![];
 
+        // get the arguments that are required by the function,
+        // even if they have a default value
         for arg in &function.parameters {
-            if arg.data_type.is_some() {
-                let data_type = arg.data_type.as_ref().unwrap();
-
-                if data_type.nullable() {
-                    continue;
-                }
-            }
-
-            if arg.default_value.is_some() {
-                continue;
-            }
-
-            non_optional_arguments.push(arg);
+            required_arguments.push(arg);
         }
 
         // get the arguments with which the function was called
@@ -83,11 +72,35 @@ pub fn function_call(
                 Argument::Positional(positional_arg) => {
                     let argument_value = evaluator.eval_expression(&positional_arg.value)?;
 
+                    if positional_arg.ellipsis.is_some() {
+                        if !argument_value.is_iterable() {
+                            return Err(PhpError {
+                                level: ErrorLevel::Fatal,
+                                message: "Only arrays and Traversables can be unpacked".to_string(),
+                                line: called_in_line,
+                            });
+                        }
+
+                        todo!()
+                    }
+
                     positional_arguments.push(argument_value);
                 }
                 Argument::Named(named_arg) => {
                     let name = &named_arg.name.value;
                     let value = evaluator.eval_expression(&named_arg.value)?;
+
+					if named_arg.ellipsis.is_some() {
+						if !value.is_iterable() {
+							return Err(PhpError {
+								level: ErrorLevel::Fatal,
+								message: "Only arrays and Traversables can be unpacked".to_string(),
+								line: called_in_line,
+							});
+						}
+
+						todo!()
+					}
 
                     named_arguments.insert(name.to_vec(), value);
                 }
@@ -113,7 +126,7 @@ pub fn function_call(
                     target_name,
                     i + 1,
                     get_string_from_bytes(&self_arg.name.name.bytes),
-					error.message
+                    error.message
                 );
 
                 return Err(error);
@@ -121,12 +134,11 @@ pub fn function_call(
 
             final_function_parameters.insert(self_arg.name.name.to_vec(), positional_arg.clone());
 
-            // remove the argument from the non optional arguments
-            non_optional_arguments.retain(|c| c.name.name != self_arg.name.name);
+            required_arguments.retain(|c| c.name.name != self_arg.name.name);
         }
 
         // iterate over the named arguments and check if they are valid
-        for (mut key, value) in named_arguments {
+        for (mut key, mut value) in named_arguments {
             // add the $ at the beginning since the argument name is saved with $
             key.insert(0, b'$');
 
@@ -141,11 +153,17 @@ pub fn function_call(
                 });
             }
 
-            if !function
-                .parameters
-                .iter()
-                .any(|c| c.name.name.to_vec() == key)
-            {
+            let mut self_arg: Option<&CallableArgument> = None;
+
+            if !function.parameters.iter().any(|c| {
+                if c.name.name.bytes == key {
+                    self_arg = Some(c);
+
+                    return true;
+                }
+
+                c.name.name.bytes == key
+            }) {
                 return Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: format!("Unknown named argument {}", get_string_from_bytes(&key)),
@@ -153,23 +171,46 @@ pub fn function_call(
                 });
             }
 
-            // remove the argument from the non optional arguments
-            non_optional_arguments.retain(|c| c.name.name.bytes != key);
+            // validate the argument
+            let self_arg = self_arg.unwrap();
+
+            let is_not_valid = self_arg.is_valid(&mut value, called_in_line);
+
+            if is_not_valid.is_some() {
+                let mut error = is_not_valid.unwrap();
+
+                error.message = format!(
+                    "{}(): Argument #{} ({}): {}",
+                    target_name,
+                    final_function_parameters.len(),
+                    get_string_from_bytes(&self_arg.name.name.bytes),
+                    error.message
+                );
+
+                return Err(error);
+            }
+
+            required_arguments.retain(|c| c.name.name.bytes != key);
 
             final_function_parameters.insert(key, value);
         }
 
-        if non_optional_arguments.len() > 0 {
-            return Err(PhpError {
-                level: ErrorLevel::Fatal,
-                message: format!(
-                    "Too few arguments to function {}(), {} passed and exactly {} was expected",
-                    target_name,
-                    call.arguments.arguments.len(),
-                    non_optional_arguments.len()
-                ),
-                line: called_in_line,
-            });
+        for noa in required_arguments.iter() {
+            if noa.default_value.is_none() {
+                return Err(PhpError {
+                    level: ErrorLevel::Fatal,
+                    message: format!(
+                        "Too few arguments to function {}(), {} passed and exactly {} was expected",
+                        target_name,
+                        call.arguments.arguments.len(),
+                        required_arguments.len() + 1
+                    ),
+                    line: called_in_line,
+                });
+            }
+
+            final_function_parameters
+                .insert(noa.name.name.to_vec(), noa.default_value.clone().unwrap());
         }
     }
 

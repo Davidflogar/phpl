@@ -7,7 +7,7 @@ use std::{
 use php_parser_rs::lexer::token::Span;
 
 use crate::{
-    helpers::get_string_from_bytes,
+    helpers::helpers::get_string_from_bytes,
     php_value::{ErrorLevel, PhpError, PhpValue},
 };
 
