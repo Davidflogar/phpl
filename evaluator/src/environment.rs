@@ -8,29 +8,11 @@ use php_parser_rs::lexer::token::Span;
 
 use crate::{
     helpers::helpers::get_string_from_bytes,
-    php_value::{ErrorLevel, PhpError, PhpValue},
+    php_value::{
+        php_object::PhpObject,
+        php_value::{ErrorLevel, PhpError, PhpValue},
+    },
 };
-
-#[derive(Clone)]
-pub struct TrackedChanges {
-    pub added_vars: Vec<Vec<u8>>,
-    pub added_identifiers: Vec<Vec<u8>>,
-
-    /// Contains a list of variables that have been modified.
-    ///
-    /// It is a map from the variable name to the value of the variable before the modification.
-    pub modified_vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
-}
-
-impl TrackedChanges {
-    pub fn new() -> TrackedChanges {
-        TrackedChanges {
-            added_vars: Vec::new(),
-            added_identifiers: Vec::new(),
-            modified_vars: HashMap::new(),
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct Environment {
@@ -46,6 +28,32 @@ pub struct Environment {
     trace: bool,
 
     tracked_changes: TrackedChanges,
+
+    classes: HashMap<Vec<u8>, PhpObject>,
+}
+
+#[derive(Clone)]
+pub struct TrackedChanges {
+    pub added_vars: Vec<Vec<u8>>,
+    pub added_identifiers: Vec<Vec<u8>>,
+
+    /// Contains a list of variables that have been modified.
+    ///
+    /// It is a map from the variable name to the value of the variable before the modification.
+    pub modified_vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
+
+    pub added_classes: Vec<Vec<u8>>,
+}
+
+impl TrackedChanges {
+    pub fn new() -> TrackedChanges {
+        TrackedChanges {
+            added_vars: Vec::new(),
+            added_identifiers: Vec::new(),
+            modified_vars: HashMap::new(),
+            added_classes: Vec::new(),
+        }
+    }
 }
 
 impl Environment {
@@ -55,6 +63,7 @@ impl Environment {
             identifiers: HashMap::new(),
             trace: false,
             tracked_changes: TrackedChanges::new(),
+            classes: HashMap::new(),
         }
     }
 
@@ -112,10 +121,7 @@ impl Environment {
 
         let value = self.vars.get(&key);
 
-        match value {
-            Some(value) => Some(value.borrow().clone()),
-            None => None,
-        }
+        value.map(|value| value.borrow().clone())
     }
 
     pub fn var_exists(&self, key: &[u8]) -> bool {
@@ -138,7 +144,6 @@ impl Environment {
     pub fn restore(&mut self) {
         self.trace = false;
 
-
         for key in self.tracked_changes.added_vars.iter() {
             self.vars.remove(key);
         }
@@ -153,10 +158,10 @@ impl Environment {
         self.tracked_changes.added_identifiers.clear();
 
         for (key, value) in self.tracked_changes.modified_vars.iter() {
-			self.vars.insert(key.to_vec(), value.clone());
-		}
+            self.vars.insert(key.to_vec(), value.clone());
+        }
 
-		self.tracked_changes.modified_vars.clear();
+        self.tracked_changes.modified_vars.clear();
     }
 
     pub fn new_ident(&mut self, ident: &[u8], value: PhpValue, span: Span) -> Option<PhpError> {
@@ -177,5 +182,29 @@ impl Environment {
                 None
             }
         }
+    }
+
+    pub fn new_class(&mut self, name: &[u8], value: PhpObject, span: Span) -> Option<PhpError> {
+        match self.classes.entry(name.to_vec()) {
+            std::collections::hash_map::Entry::Occupied(entry) => Some(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Cannot redeclare class {} because the name is already in use",
+                    get_string_from_bytes(entry.key())
+                ),
+                line: span.line,
+            }),
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                entry.insert(value);
+
+                self.tracked_changes.added_classes.push(name.to_vec());
+
+                None
+            }
+        }
+    }
+
+    pub fn get_class(&self, ident: &[u8]) -> Option<PhpObject> {
+        self.classes.get(ident).cloned()
     }
 }

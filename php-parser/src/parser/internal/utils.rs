@@ -180,7 +180,7 @@ pub fn comma_separated_with_persistent_value<T>(
     let mut inner: Vec<T> = vec![];
     let mut commas: Vec<Span> = vec![];
     let mut current = state.stream.current();
-	let mut persistent = false;
+    let mut persistent = false;
 
     while current.kind != until {
         inner.push(func(state, &mut persistent)?);

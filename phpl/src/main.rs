@@ -15,7 +15,7 @@ fn main() -> Result<()> {
 
     let content = fs::read_to_string(file_name)?;
 
-    eval_program(&file_name, &content)?;
+    eval_program(file_name, &content)?;
 
     Ok(())
 }

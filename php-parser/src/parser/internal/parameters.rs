@@ -78,9 +78,9 @@ pub fn function_parameter_list(
 
             if used_ellipsis_before_this_arg {
                 return Err(error::only_the_last_parameter_can_be_variadic(
-					current.span,
-					state.stream.current().span,
-				));
+                    current.span,
+                    state.stream.current().span,
+                ));
             }
 
             Ok(FunctionParameter {

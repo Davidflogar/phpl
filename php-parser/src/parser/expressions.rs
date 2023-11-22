@@ -159,13 +159,10 @@ fn for_precedence(state: &mut State, precedence: Precedence) -> ParseResult<Expr
                 TokenKind::Equals if op.kind == TokenKind::Ampersand => {
                     state.stream.next();
 
-					let s = state.stream.previous();
+                    let s = state.stream.previous();
 
-					if !matches!(left, Expression::Variable(_)) {
-                        return Err(error::unexpected_token(
-                            vec![],
-                            s,
-                        ));
+                    if !matches!(left, Expression::Variable(_)) {
+                        return Err(error::unexpected_token(vec![], s));
                     }
 
                     let right = Box::new(for_precedence(state, rpred)?);
@@ -284,12 +281,9 @@ fn for_precedence(state: &mut State, precedence: Precedence) -> ParseResult<Expr
                             },
                         ),
                         TokenKind::Equals => {
-							if !matches!(*left, Expression::Variable(_)) {
-								return Err(error::unexpected_token(
-									vec![],
-									current,
-								));
-							}
+                            if !matches!(*left, Expression::Variable(_)) {
+                                return Err(error::unexpected_token(vec![], current));
+                            }
 
                             Expression::AssignmentOperation(AssignmentOperationExpression::Assign {
                                 left,

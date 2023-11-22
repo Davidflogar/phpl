@@ -16,9 +16,9 @@ pub fn eval_program(input: &str, content: &str) -> IoResult<()> {
                 let result = evaluator.eval_statement(node);
 
                 if evaluator.die || result.is_err() {
-                    if result.is_err() {
-                        evaluator.output = format!("{}", result.unwrap_err().get_message(input));
-                    }
+                    if let Err(error) = result {
+						evaluator.output = error.get_message(input)
+					}
 
                     break;
                 }
@@ -31,9 +31,9 @@ pub fn eval_program(input: &str, content: &str) -> IoResult<()> {
             print!("{}", evaluator.output);
         }
         Err(err) => {
-            println!("{}", err.report(&content, Some(input), true, false)?);
+            println!("{}", err.report(content, Some(input), true, false)?);
         }
     }
 
-    return Ok(());
+    Ok(())
 }

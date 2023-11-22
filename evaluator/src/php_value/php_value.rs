@@ -11,8 +11,10 @@ use php_parser_rs::parser::ast::functions::ReturnType;
 use php_parser_rs::parser::ast::variables::SimpleVariable;
 use php_parser_rs::parser::ast::Statement;
 
-use crate::helpers::callable_helpers::php_value_matches_type;
+use crate::helpers::callable::php_value_matches_type;
 use crate::helpers::helpers::get_string_from_bytes;
+
+use super::php_object::PhpObject;
 
 pub const NULL: &str = "null";
 pub const BOOL: &str = "bool";
@@ -65,14 +67,6 @@ pub enum ErrorLevel {
 
 #[derive(Debug, Clone)]
 pub enum Resource {}
-
-#[derive(Debug, Clone)]
-pub struct PhpObject {
-    pub name: String,
-    pub properties: Vec<PhpValue>,
-    pub methods: Vec<PhpCallable>,
-    pub parent: Option<Box<PhpObject>>,
-}
 
 #[derive(Debug, Clone)]
 pub struct PhpCallable {
@@ -141,8 +135,8 @@ impl PhpValue {
 
     /// Concatenates two values.
     pub fn concat(self, value: PhpValue) -> Result<PhpValue, PhpError> {
-        let self_as_string = self.to_string();
-        let value_as_string = value.to_string();
+        let self_as_string = self.printable();
+        let value_as_string = value.printable();
 
         if self_as_string.is_none() || value_as_string.is_none() {
             let error_message = format!(
@@ -249,13 +243,34 @@ impl PhpValue {
         }
     }
 
-	pub fn is_iterable(&self) -> bool {
-		match self {
-			PhpValue::Array(_) => true,
-			// TODO: PhpValue::Object(o) => o.is_instance_of("iterable"),
-			_ => false,
-		}
-	}
+    pub fn is_iterable(&self) -> bool {
+        match self {
+            PhpValue::Array(_) => true,
+            // TODO: PhpValue::Object(o) => o.is_instance_of("iterable"),
+            _ => false,
+        }
+    }
+
+    // Returns the value as a string.
+    pub fn printable(&self) -> Option<String> {
+        match self {
+            PhpValue::Null => Some("NULL".to_string()),
+            PhpValue::Bool(b) => {
+                if *b {
+                    Some("1".to_string())
+                } else {
+                    Some("".to_string())
+                }
+            }
+            PhpValue::Int(i) => Some(i.to_string()),
+            PhpValue::Float(f) => Some(f.to_string()),
+            PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
+            PhpValue::Array(_) => None,
+            PhpValue::Object(_) => None,
+            PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name.bytes)),
+            PhpValue::Resource(_) => Some("Resource".to_string()),
+        }
+    }
 
     /*
      * Functions to convert to a data type.
@@ -301,21 +316,10 @@ impl PhpValue {
 
     pub fn to_string(&self) -> Option<String> {
         match self {
-            PhpValue::Null => Some("NULL".to_string()),
-            PhpValue::Bool(b) => {
-                if *b {
-                    Some("1".to_string())
-                } else {
-                    Some("".to_string())
-                }
-            }
             PhpValue::Int(i) => Some(i.to_string()),
             PhpValue::Float(f) => Some(f.to_string()),
             PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
-            PhpValue::Array(_) => None,
-            PhpValue::Object(_) => None,
-            PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name.bytes)),
-            PhpValue::Resource(_) => Some("Resource".to_string()),
+            _ => None,
         }
     }
 }
@@ -472,11 +476,11 @@ impl Not for PhpValue {
 impl PartialEq for PhpValue {
     fn eq(&self, other: &Self) -> bool {
         self.partial_cmp(other) == Some(Ordering::Equal)
-    }
+	}
 
-    fn ne(&self, other: &Self) -> bool {
-        !self.eq(other)
-    }
+	fn ne(&self, other: &Self) -> bool {
+		self.partial_cmp(other) != Some(Ordering::Equal)
+	}
 }
 
 impl PartialOrd for PhpValue {
@@ -485,28 +489,6 @@ impl PartialOrd for PhpValue {
         let other_size = other.get_size();
 
         Some(self_size.cmp(&other_size))
-    }
-}
-
-impl PhpObject {
-    pub fn is_instance_of(self, object: PhpValue) -> Result<bool, PhpError> {
-        if let PhpValue::Object(object) = object {
-            if object.name == self.name {
-                return Ok(true);
-            }
-
-            if self.parent.is_some() && self.parent.unwrap().name == object.name {
-                return Ok(true);
-            }
-
-            Ok(false)
-        } else {
-            Err(PhpError {
-                level: ErrorLevel::Fatal,
-                message: "Right side of instanceof must be an object".to_string(),
-                line: 0,
-            })
-        }
     }
 }
 

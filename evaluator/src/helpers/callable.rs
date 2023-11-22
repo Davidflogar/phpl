@@ -1,6 +1,9 @@
 use php_parser_rs::parser::ast::data_type::Type;
 
-use crate::{php_value::{PhpValue, PhpError}, errors};
+use crate::{
+    errors,
+    php_value::php_value::{PhpError, PhpValue},
+};
 
 /// Checks if a PHP value matches a type.
 ///
@@ -8,7 +11,7 @@ use crate::{php_value::{PhpValue, PhpError}, errors};
 pub fn php_value_matches_type(
     r#type: &Type,
     php_value: &mut PhpValue,
-    called_in_line: usize,
+    line: usize,
 ) -> Option<PhpError> {
     match r#type {
         Type::Named(_, _) => todo!(),
@@ -17,12 +20,12 @@ pub fn php_value_matches_type(
                 return None;
             }
 
-            php_value_matches_type(r#type, php_value, called_in_line)
+            php_value_matches_type(r#type, php_value, line)
         }
         Type::Union(types) => {
             let matches_any = types
                 .iter()
-                .any(|ty| php_value_matches_type(ty, php_value, called_in_line).is_none());
+                .any(|ty| php_value_matches_type(ty, php_value, line).is_none());
 
             if !matches_any {
                 return Some(errors::expected_type_but_got(
@@ -32,7 +35,7 @@ pub fn php_value_matches_type(
                         .collect::<Vec<_>>()
                         .join("|"),
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -40,7 +43,7 @@ pub fn php_value_matches_type(
         }
         Type::Intersection(types) => {
             for ty in types {
-                if let Some(_) = php_value_matches_type(ty, php_value, called_in_line) {
+                if let Some(_) = php_value_matches_type(ty, php_value, line) {
                     return Some(errors::expected_type_but_got(
                         &types
                             .iter()
@@ -48,7 +51,7 @@ pub fn php_value_matches_type(
                             .collect::<Vec<_>>()
                             .join("&"),
                         php_value.get_type_as_string(),
-                        called_in_line,
+                        line,
                     ));
                 }
             }
@@ -61,7 +64,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "null",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -72,7 +75,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "true",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             };
 
@@ -80,7 +83,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "true",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -93,7 +96,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "false",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             };
 
@@ -101,7 +104,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "false",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -117,7 +120,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "float",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -130,7 +133,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "boolean",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -143,7 +146,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "int",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -158,7 +161,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "string",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -171,7 +174,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "array",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -182,7 +185,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "object",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 
@@ -194,7 +197,7 @@ pub fn php_value_matches_type(
                 return Some(errors::expected_type_but_got(
                     "callable",
                     php_value.get_type_as_string(),
-                    called_in_line,
+                    line,
                 ));
             }
 

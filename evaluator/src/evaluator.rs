@@ -16,15 +16,16 @@ use php_parser_rs::{
     },
 };
 
-use crate::errors::cannot_use_type_as_default_value_for_parameter_default_of_type;
 use crate::expressions::function_call;
-use crate::helpers::callable_helpers::php_value_matches_type;
+use crate::helpers::callable::php_value_matches_type;
 use crate::helpers::helpers::{get_string_from_bytes, parse_php_file};
-use crate::php_value::{CallableArgument, PhpCallable};
+use crate::php_value::php_value::{CallableArgument, PhpCallable};
+use crate::statements::class;
+use crate::warnings;
 use crate::{
     environment::Environment,
     helpers::helpers::get_span_from_var,
-    php_value::{ErrorLevel, PhpError, PhpValue},
+    php_value::php_value::{ErrorLevel, PhpError, PhpValue},
 };
 
 const NULL: PhpValue = PhpValue::Null;
@@ -85,8 +86,8 @@ impl<'a> Evaluator<'a> {
             Statement::Expression(e) => {
                 let expression_result = self.eval_expression(&e.expression);
 
-                if expression_result.is_err() {
-                    return Err(expression_result.unwrap_err());
+                if let Err(err) = expression_result{
+                    return Err(err);
                 }
 
                 Ok(NULL)
@@ -95,17 +96,13 @@ impl<'a> Evaluator<'a> {
                 for expr in echo.values {
                     let expression_result = self.eval_expression(&expr)?;
 
-                    let expression_as_string = expression_result.to_string();
+                    let expression_as_string = expression_result.printable();
 
                     if expression_as_string.is_none() {
-                        self.warnings.push(PhpError {
-                            level: ErrorLevel::Warning,
-                            message: format!(
-                                "{} to string conversion failed.",
-                                expression_result.get_type_as_string()
-                            ),
-                            line: echo.echo.line,
-                        });
+                        self.warnings.push(warnings::string_conversion_failed(
+                            expression_result.get_type_as_string(),
+                            echo.echo,
+                        ));
 
                         self.add_output(expression_result.get_type_as_string().as_str())
                     }
@@ -131,24 +128,26 @@ impl<'a> Evaluator<'a> {
                             php_value_matches_type(&default_data_type, &mut default_expression, 0);
 
                         if is_not_valid.is_some() {
-                            return Err(
-                                cannot_use_type_as_default_value_for_parameter_default_of_type(
+                            return Err(PhpError {
+                                level: ErrorLevel::Fatal,
+                                message: format!(
+                                    "Cannot use {} as default value for parameter {} of type {}",
                                     default_expression.get_type_as_string(),
                                     get_string_from_bytes(&arg.name.name.bytes),
-                                    default_data_type.to_string(),
-                                    default_data_type.first_span().line,
+                                    default_data_type
                                 ),
-                            );
+                                line: default_data_type.first_span().line,
+                            });
                         }
 
-						default_value = Some(default_expression);
+                        default_value = Some(default_expression);
                     }
 
                     callable_args.push(CallableArgument {
                         name: arg.name,
                         data_type: arg.data_type,
                         pass_by_reference: arg.ampersand.is_some(),
-                        default_value: default_value,
+                        default_value,
                         ellipsis: arg.ellipsis.is_some(),
                     });
                 }
@@ -170,12 +169,13 @@ impl<'a> Evaluator<'a> {
                     func.function,
                 );
 
-                if set_identifier.is_some() {
-                    return Err(set_identifier.unwrap());
+                if let Some(err) = set_identifier {
+                    return Err(err);
                 }
 
                 Ok(NULL)
             }
+            Statement::Class(statement) => class::statement(self, statement),
             _ => {
                 println!("TODO: statement {:#?}\n", node);
                 Ok(NULL)
@@ -193,17 +193,11 @@ impl<'a> Evaluator<'a> {
 
                 let match_result = match arg_as_php_value {
                     PhpValue::Null => PhpValue::Bool(true),
-                    PhpValue::Bool(b) => {
-                        if !b {
-                            PhpValue::Bool(true);
-                        }
-
-                        PhpValue::Bool(false)
-                    }
+                    PhpValue::Bool(b) => PhpValue::Bool(!b),
                     PhpValue::String(s) => {
                         let string = get_string_from_bytes(&s.bytes);
 
-                        PhpValue::Bool(string == "" || string == "0")
+                        PhpValue::Bool(string.is_empty() || string == "0")
                     }
                     PhpValue::Float(f) => PhpValue::Bool(f == 0.0),
                     PhpValue::Int(i) => PhpValue::Bool(i == 0),
@@ -255,17 +249,13 @@ impl<'a> Evaluator<'a> {
 
                     let value = self.eval_expression(&expr)?;
 
-                    let value_as_string = value.to_string();
+                    let value_as_string = value.printable();
 
                     if value_as_string.is_none() {
-                        self.warnings.push(PhpError {
-                            level: ErrorLevel::Warning,
-                            message: format!(
-                                "{} to string conversion failed.",
-                                value.get_type_as_string()
-                            ),
-                            line: pe.print.line,
-                        });
+                        self.warnings.push(warnings::string_conversion_failed(
+                            value.get_type_as_string(),
+                            pe.print,
+                        ));
 
                         return Ok(PhpValue::String(value.get_type_as_string().into()));
                     }
@@ -276,17 +266,13 @@ impl<'a> Evaluator<'a> {
 
                     let value = self.eval_expression(&arg.argument.value)?;
 
-                    let value_as_string = value.to_string();
+                    let value_as_string = value.printable();
 
                     if value_as_string.is_none() {
-                        self.warnings.push(PhpError {
-                            level: ErrorLevel::Warning,
-                            message: format!(
-                                "{} to string conversion failed.",
-                                value.get_type_as_string()
-                            ),
-                            line: pe.print.line,
-                        });
+                        self.warnings.push(warnings::string_conversion_failed(
+                            value.get_type_as_string(),
+                            pe.print,
+                        ));
 
                         return Ok(PhpValue::String(value.get_type_as_string().into()));
                     }
@@ -721,8 +707,8 @@ impl<'a> Evaluator<'a> {
 
                     let expr = self.env.get_ident(identifier_name);
 
-                    if expr.is_some() {
-                        Ok(expr.unwrap().clone())
+                    if let Some(expr) = expr {
+                        Ok(expr.clone())
                     } else {
                         let error = format!("Identifier {} not found", identifier_name,);
 
@@ -748,7 +734,8 @@ impl<'a> Evaluator<'a> {
             Expression::RequireOnce(require) => {
                 self.handle_require(&require.path, true, require.require_once)
             }
-            Expression::FunctionCall(call) => function_call::function_call(self, call),
+            Expression::FunctionCall(call) => function_call::expression(self, call),
+            Expression::FunctionClosureCreation(_) => todo!(),
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
         }
@@ -804,17 +791,13 @@ impl<'a> Evaluator<'a> {
             Variable::BracedVariableVariable(bvv) => {
                 let expr_value = self.eval_expression(&bvv.variable)?;
 
-                let expr_as_string = expr_value.to_string();
+                let expr_as_string = expr_value.printable();
 
                 if expr_as_string.is_none() {
-                    self.warnings.push(PhpError {
-                        level: ErrorLevel::Warning,
-                        message: format!(
-                            "{} to string conversion failed",
-                            expr_value.get_type_as_string()
-                        ),
-                        line: bvv.start.line,
-                    });
+                    self.warnings.push(warnings::string_conversion_failed(
+                        expr_value.get_type_as_string(),
+                        bvv.start,
+                    ));
 
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
@@ -861,7 +844,7 @@ impl<'a> Evaluator<'a> {
             Variable::BracedVariableVariable(bvv) => {
                 let expr_value = self.eval_expression(&bvv.variable)?;
 
-                let expr_as_string = expr_value.to_string();
+                let expr_as_string = expr_value.printable();
 
                 if expr_as_string.is_none() {
                     self.warnings.push(PhpError {
@@ -1006,14 +989,13 @@ impl<'a> Evaluator<'a> {
     ) -> Result<PhpValue, PhpError> {
         let path = self.eval_expression(&path)?;
 
-        let path_as_string = path.to_string();
+        let path_as_string = path.printable();
 
         if path_as_string.is_none() {
-            self.warnings.push(PhpError {
-                level: ErrorLevel::Warning,
-                message: format!("{} to string conversion failed", path.get_type_as_string(),),
-                line: span.line,
-            });
+            self.warnings.push(warnings::string_conversion_failed(
+                path.get_type_as_string(),
+                span,
+            ));
         }
 
         let real_path = path_as_string.unwrap_or("".to_string());
@@ -1066,14 +1048,13 @@ impl<'a> Evaluator<'a> {
     ) -> Result<PhpValue, PhpError> {
         let path = self.eval_expression(&path)?;
 
-        let path_as_string = path.to_string();
+        let path_as_string = path.printable();
 
         if path_as_string.is_none() {
-            self.warnings.push(PhpError {
-                level: ErrorLevel::Warning,
-                message: format!("{} to string conversion failed", path.get_type_as_string(),),
-                line: span.line,
-            });
+            self.warnings.push(warnings::string_conversion_failed(
+                path.get_type_as_string(),
+                span,
+            ));
         }
 
         let real_path = path_as_string.unwrap_or("".to_string());

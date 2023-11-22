@@ -1048,7 +1048,7 @@ pub fn only_the_last_parameter_can_be_variadic(span: Span, next: Span) -> ParseE
     .error(
         "try removing this parameter",
         span.position,
-    	next.position - span.position,
+        next.position - span.position,
     )
 }
 

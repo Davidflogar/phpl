@@ -5,10 +5,10 @@ use php_parser_rs::parser::ast::{arguments::Argument, FunctionCallExpression};
 use crate::{
     evaluator::Evaluator,
     helpers::helpers::get_string_from_bytes,
-    php_value::{CallableArgument, ErrorLevel, PhpError, PhpValue},
+    php_value::php_value::{CallableArgument, ErrorLevel, PhpError, PhpValue},
 };
 
-pub fn function_call(
+pub fn expression(
     evaluator: &mut Evaluator,
     call: &FunctionCallExpression,
 ) -> Result<PhpValue, PhpError> {
@@ -17,7 +17,7 @@ pub fn function_call(
     // get the target
     let target = evaluator.eval_expression(&call.target)?;
 
-    let target_to_string = target.to_string();
+    let target_to_string = target.printable();
 
     if target_to_string.is_none() {
         evaluator.warnings.push(PhpError {
@@ -90,17 +90,17 @@ pub fn function_call(
                     let name = &named_arg.name.value;
                     let value = evaluator.eval_expression(&named_arg.value)?;
 
-					if named_arg.ellipsis.is_some() {
-						if !value.is_iterable() {
-							return Err(PhpError {
-								level: ErrorLevel::Fatal,
-								message: "Only arrays and Traversables can be unpacked".to_string(),
-								line: called_in_line,
-							});
-						}
+                    if named_arg.ellipsis.is_some() {
+                        if !value.is_iterable() {
+                            return Err(PhpError {
+                                level: ErrorLevel::Fatal,
+                                message: "Only arrays and Traversables can be unpacked".to_string(),
+                                line: called_in_line,
+                            });
+                        }
 
-						todo!()
-					}
+                        todo!()
+                    }
 
                     named_arguments.insert(name.to_vec(), value);
                 }
