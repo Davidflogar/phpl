@@ -7,10 +7,10 @@ use std::{
 use php_parser_rs::lexer::token::Span;
 
 use crate::{
-    helpers::helpers::get_string_from_bytes,
+    helpers::get_string_from_bytes,
     php_value::{
         php_object::PhpObject,
-        php_value::{ErrorLevel, PhpError, PhpValue},
+        value::{ErrorLevel, PhpError, PhpValue},
     },
 };
 

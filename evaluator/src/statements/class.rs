@@ -7,10 +7,10 @@ use php_parser_rs::parser::ast::{
 
 use crate::{
     evaluator::Evaluator,
-    helpers::{helpers::get_string_from_bytes, object::property_has_valid_default_value},
+    helpers::{get_string_from_bytes, object::property_has_valid_default_value},
     php_value::{
         php_object::{PhpObject, PhpObjectConstant, PhpObjectProperty},
-        php_value::{ErrorLevel, PhpError, PhpValue},
+        value::{ErrorLevel, PhpError, PhpValue},
     },
 };
 

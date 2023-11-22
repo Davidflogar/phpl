@@ -12,7 +12,7 @@ use php_parser_rs::parser::ast::variables::SimpleVariable;
 use php_parser_rs::parser::ast::Statement;
 
 use crate::helpers::callable::php_value_matches_type;
-use crate::helpers::helpers::get_string_from_bytes;
+use crate::helpers::get_string_from_bytes;
 
 use super::php_object::PhpObject;
 
@@ -96,13 +96,13 @@ impl PhpValue {
             (PhpValue::Int(i), PhpValue::Int(j)) => Ok(PhpValue::Int(i.pow(j as u32))),
             (PhpValue::Float(f), PhpValue::Float(g)) => Ok(PhpValue::Float(f.powf(g))),
             (PhpValue::Int(i), PhpValue::Float(f)) => {
-                let f = f as f32;
+                let f = f;
                 let i = i as f32;
 
                 Ok(PhpValue::Float(i.powf(f)))
             }
             (PhpValue::Float(f), PhpValue::Int(i)) => {
-                let f = f as f32;
+                let f = f;
                 let i = i as f32;
 
                 Ok(PhpValue::Float(f.powf(i)))
@@ -158,21 +158,18 @@ impl PhpValue {
     }
 
     pub fn is_null(&self) -> bool {
-        match self {
-            PhpValue::Null => true,
-            _ => false,
-        }
+		matches!(self, PhpValue::Null)
     }
 
     /// Checks if the value is "true" in PHP terms.
-    pub fn is_true(self) -> bool {
+    pub fn true_in_php(self) -> bool {
         match self {
             PhpValue::Null => false,
             PhpValue::Bool(b) => b,
             PhpValue::Int(i) => i != 0,
             PhpValue::Float(f) => f != 0.0,
             PhpValue::String(s) => s.len() > 0,
-            PhpValue::Array(a) => a.len() != 0,
+            PhpValue::Array(a) => !a.is_empty(),
             PhpValue::Object(_) => true,
             PhpValue::Callable(_) => true,
             PhpValue::Resource(_) => true,
@@ -223,9 +220,9 @@ impl PhpValue {
         let right = right_float.unwrap();
 
         if self_type == INT {
-            return Ok(PhpValue::Int(operation(left, right) as i32));
+            Ok(PhpValue::Int(operation(left, right) as i32))
         } else {
-            return Ok(PhpValue::Float(operation(left, right)));
+            Ok(PhpValue::Float(operation(left, right)))
         }
     }
 
@@ -289,7 +286,7 @@ impl PhpValue {
                     return None;
                 }
 
-                return Some(int_value.unwrap());
+                Some(int_value.unwrap())
             }
             _ => None,
         }
@@ -308,7 +305,7 @@ impl PhpValue {
                     return None;
                 }
 
-                return Some(float_value.unwrap());
+                Some(float_value.unwrap())
             }
             _ => None,
         }
@@ -373,7 +370,7 @@ impl Div for PhpValue {
         if right_to_float.unwrap() == 0.0 {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
-                message: format!("Division by zero"),
+                message: "Division by zero".to_string(),
                 line: 0,
             });
         }
@@ -458,7 +455,7 @@ impl Not for PhpValue {
             PhpValue::Float(f) => Ok(PhpValue::Bool(f == 0.0)),
             PhpValue::String(s) => Ok(PhpValue::Bool(s.len() == 0)),
             PhpValue::Null => Ok(PhpValue::Bool(true)),
-            PhpValue::Array(a) => Ok(PhpValue::Bool(a.len() == 0)),
+            PhpValue::Array(a) => Ok(PhpValue::Bool(a.is_empty())),
             _ => {
                 let error_message =
                     format!("Unsupported operation: !{}", self.get_type_as_string());
@@ -478,9 +475,6 @@ impl PartialEq for PhpValue {
         self.partial_cmp(other) == Some(Ordering::Equal)
 	}
 
-	fn ne(&self, other: &Self) -> bool {
-		self.partial_cmp(other) != Some(Ordering::Equal)
-	}
 }
 
 impl PartialOrd for PhpValue {

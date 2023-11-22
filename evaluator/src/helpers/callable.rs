@@ -2,7 +2,7 @@ use php_parser_rs::parser::ast::data_type::Type;
 
 use crate::{
     errors,
-    php_value::php_value::{PhpError, PhpValue},
+    php_value::value::{PhpError, PhpValue},
 };
 
 /// Checks if a PHP value matches a type.
@@ -43,7 +43,7 @@ pub fn php_value_matches_type(
         }
         Type::Intersection(types) => {
             for ty in types {
-                if let Some(_) = php_value_matches_type(ty, php_value, line) {
+                if php_value_matches_type(ty, php_value, line).is_some() {
                     return Some(errors::expected_type_but_got(
                         &types
                             .iter()

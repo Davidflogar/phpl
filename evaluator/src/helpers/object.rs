@@ -2,7 +2,7 @@ use php_parser_rs::parser::ast::data_type::Type;
 
 use crate::{
     errors,
-    php_value::php_value::{PhpError, PhpValue},
+    php_value::value::{PhpError, PhpValue},
 };
 
 // Checks that a property has a valid default value.
@@ -13,9 +13,7 @@ pub fn property_has_valid_default_value(
     class_name: &str,
     property_name: &str,
 ) -> Option<PhpError> {
-    if r#type.is_none() {
-        return None;
-    }
+    r#type?;
 
     match r#type.unwrap() {
         Type::Named(_, _) => todo!(),
@@ -52,13 +50,13 @@ pub fn property_has_valid_default_value(
         }
         Type::Intersection(types) => {
             for ty in types {
-                if let Some(_) = property_has_valid_default_value(
+                if property_has_valid_default_value(
                     Some(ty),
                     default,
                     line,
                     class_name,
                     property_name,
-                ) {
+                ).is_some() {
                     return Some(
                         errors::cannot_use_type_as_default_value_for_property_of_type(
                             default.get_type_as_string(),

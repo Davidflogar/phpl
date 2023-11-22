@@ -680,7 +680,7 @@ expressions! {
         let arguments = parameters::argument_list_with_positional_parameters(state)?;
 
 
-        if arguments.arguments.len() == 0 {
+        if arguments.arguments.is_empty() {
             return Err(error::argument_is_required(isset, state.stream.current().span));
         }
 
@@ -708,7 +708,7 @@ expressions! {
         state.stream.next();
         let arguments = parameters::argument_list_with_positional_parameters(state)?;
 
-        if arguments.arguments.len() == 0 {
+        if arguments.arguments.is_empty() {
             return Err(error::argument_is_required(unset, state.stream.current().span));
         }
 

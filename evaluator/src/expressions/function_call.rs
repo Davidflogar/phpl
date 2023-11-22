@@ -4,8 +4,8 @@ use php_parser_rs::parser::ast::{arguments::Argument, FunctionCallExpression};
 
 use crate::{
     evaluator::Evaluator,
-    helpers::helpers::get_string_from_bytes,
-    php_value::php_value::{CallableArgument, ErrorLevel, PhpError, PhpValue},
+    helpers::get_string_from_bytes,
+    php_value::value::{CallableArgument, ErrorLevel, PhpError, PhpValue},
 };
 
 pub fn expression(
@@ -54,7 +54,7 @@ pub fn expression(
 
     let mut final_function_parameters: HashMap<Vec<u8>, PhpValue> = HashMap::new();
 
-    if function.parameters.len() != 0 {
+    if !function.parameters.is_empty() {
         let mut required_arguments: Vec<&CallableArgument> = vec![];
 
         // get the arguments that are required by the function,
@@ -118,9 +118,7 @@ pub fn expression(
             // validate the argument
             let is_not_valid = self_arg.is_valid(&mut positional_arg, called_in_line);
 
-            if is_not_valid.is_some() {
-                let mut error = is_not_valid.unwrap();
-
+            if let Some(mut error) = is_not_valid {
                 error.message = format!(
                     "{}(): Argument #{} ({}): {}",
                     target_name,
@@ -176,9 +174,7 @@ pub fn expression(
 
             let is_not_valid = self_arg.is_valid(&mut value, called_in_line);
 
-            if is_not_valid.is_some() {
-                let mut error = is_not_valid.unwrap();
-
+            if let Some(mut error) = is_not_valid  {
                 error.message = format!(
                     "{}(): Argument #{} ({}): {}",
                     target_name,
@@ -231,12 +227,11 @@ pub fn expression(
     // restore the environment
     evaluator.env.restore();
 
-    if result.is_err() {
-        let mut err = result.unwrap_err();
+    if let Err(mut err) = result {
         err.line = called_in_line;
 
         return Err(err);
     }
 
-    return result;
+    result
 }

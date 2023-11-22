@@ -7,9 +7,9 @@ use php_parser_rs::parser::ast::{
     modifiers::{ClassModifierGroup, ConstantModifierGroup, PropertyModifierGroup},
 };
 
-use crate::helpers::helpers::get_string_from_bytes;
+use crate::helpers::get_string_from_bytes;
 
-use super::php_value::{PhpError, PhpValue, ErrorLevel};
+use super::value::{PhpError, PhpValue, ErrorLevel};
 
 #[derive(Debug, Clone)]
 pub struct PhpObject {
@@ -45,7 +45,7 @@ pub struct PhpObjectConstant {
 }
 
 impl PhpObject {
-    pub fn is_instance_of(self, object: PhpValue) -> Result<bool, PhpError> {
+    pub fn instance_of(self, object: PhpValue) -> Result<bool, PhpError> {
         if let PhpValue::Object(object) = object {
             if object.name == self.name {
                 return Ok(true);
@@ -69,7 +69,7 @@ impl PhpObject {
     pub fn extend(&mut self, parent: &PhpObject) -> Option<PhpError> {
         if parent.modifiers.has_final() {
             return Some(PhpError {
-                level: super::php_value::ErrorLevel::Fatal,
+                level: super::value::ErrorLevel::Fatal,
                 message: format!(
                     "Class {} cannot extend final class {}",
                     get_string_from_bytes(&self.name.value.bytes),
