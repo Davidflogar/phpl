@@ -2,7 +2,7 @@ use php_parser_rs::parser::ast::data_type::Type;
 
 use crate::{
     errors,
-    php_value::value::{PhpError, PhpValue},
+    php_value::types::{PhpError, PhpValue},
 };
 
 // Checks that a property has a valid default value.

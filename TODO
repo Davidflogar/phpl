@@ -3,4 +3,4 @@
 - Pass and return by reference in functions
 - Validate the data types that are supported in an Intersection (from the parser)
 - You should not be able to use ellipsis in functions like empty or isset
-- Add: Only the last parameter can be variadic in closures
+- Only the last parameter can be variadic in closures

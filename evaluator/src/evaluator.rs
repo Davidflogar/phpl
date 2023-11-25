@@ -17,15 +17,15 @@ use php_parser_rs::{
 };
 
 use crate::expressions::function_call;
-use crate::helpers::callable::php_value_matches_type;
+use crate::helpers::callable::parse_function_parameter_list;
 use crate::helpers::{get_string_from_bytes, parse_php_file};
-use crate::php_value::value::{CallableArgument, PhpCallable};
+use crate::php_value::types::PhpCallable;
 use crate::statements::class;
 use crate::warnings;
 use crate::{
     environment::Environment,
     helpers::get_span_from_var,
-    php_value::value::{ErrorLevel, PhpError, PhpValue},
+    php_value::types::{ErrorLevel, PhpError, PhpValue},
 };
 
 const NULL: PhpValue = PhpValue::Null;
@@ -84,9 +84,7 @@ impl<'a> Evaluator<'a> {
                 Ok(NULL)
             }
             Statement::Expression(e) => {
-                let expression_result = self.eval_expression(&e.expression);
-
-                expression_result?;
+                self.eval_expression(&e.expression)?;
 
                 Ok(NULL)
             }
@@ -111,44 +109,7 @@ impl<'a> Evaluator<'a> {
                 Ok(NULL)
             }
             Statement::Function(func) => {
-                let mut callable_args: Vec<CallableArgument> = vec![];
-
-                for arg in func.parameters {
-                    let mut default_value: Option<PhpValue> = None;
-
-                    if arg.default.is_some() && arg.data_type.is_some() {
-                        let mut default_expression = self.eval_expression(&arg.default.unwrap())?;
-                        let default_data_type = arg.data_type.clone().unwrap();
-
-                        // TODO: The data type conversion should not be done in this case
-                        // and only the actual data type should be accepted.
-                        let is_not_valid =
-                            php_value_matches_type(&default_data_type, &mut default_expression, 0);
-
-                        if is_not_valid.is_some() {
-                            return Err(PhpError {
-                                level: ErrorLevel::Fatal,
-                                message: format!(
-                                    "Cannot use {} as default value for parameter {} of type {}",
-                                    default_expression.get_type_as_string(),
-                                    get_string_from_bytes(&arg.name.name.bytes),
-                                    default_data_type
-                                ),
-                                line: default_data_type.first_span().line,
-                            });
-                        }
-
-                        default_value = Some(default_expression);
-                    }
-
-                    callable_args.push(CallableArgument {
-                        name: arg.name,
-                        data_type: arg.data_type,
-                        pass_by_reference: arg.ampersand.is_some(),
-                        default_value,
-                        ellipsis: arg.ellipsis.is_some(),
-                    });
-                }
+                let callable_args = parse_function_parameter_list(func.parameters, self)?;
 
                 let php_callable = PhpCallable {
                     attributes: func.attributes,
@@ -646,7 +607,9 @@ impl<'a> Evaluator<'a> {
                     let left_value = self.eval_expression(left)?;
                     let right_value = self.eval_expression(right)?;
 
-                    Ok(PhpValue::Bool(left_value.true_in_php() ^ right_value.true_in_php()))
+                    Ok(PhpValue::Bool(
+                        left_value.true_in_php() ^ right_value.true_in_php(),
+                    ))
                 }
             },
             Expression::Concat(expression) => {
@@ -656,14 +619,7 @@ impl<'a> Evaluator<'a> {
                 self.php_value_or_die(&expression.dot, left_value.concat(right_value))
             }
             Expression::Instanceof(instanceof) => {
-                let Expression::Variable(left_expr) = &*instanceof.left else {
-                    let error =
-                        "Left side of instanceof must be a variable".to_string();
-
-                    return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: instanceof.instanceof.line });
-				};
-
-                let left_expr_value = self.get_variable_value(left_expr)?;
+                let left_expr_value = self.eval_expression(&instanceof.left)?;
 
                 let PhpValue::Object(left_object) = left_expr_value else {
 					let error =
@@ -677,7 +633,11 @@ impl<'a> Evaluator<'a> {
 
                 let right_expr_value = self.eval_expression(&instanceof.right)?;
 
-                let is_instance_of = left_object.instance_of(right_expr_value);
+				// TODO: remove the unwrap
+                let is_instance_of = left_object
+                    .as_class()
+                    .unwrap()
+                    .instance_of(right_expr_value);
 
                 match is_instance_of {
                     Ok(value) => Ok(PhpValue::Bool(value)),

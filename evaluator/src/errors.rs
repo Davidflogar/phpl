@@ -1,11 +1,11 @@
 //! This file contains commonly used functions that return errors.
 //! Only include functions that are intended to be used more than once.
 
-use crate::php_value::value::{PhpError, NULL};
+use crate::php_value::types::{PhpError, NULL};
 
 pub fn expected_type_but_got(r#type: &str, given: String, line: usize) -> PhpError {
     PhpError {
-        level: crate::php_value::value::ErrorLevel::Fatal,
+        level: crate::php_value::types::ErrorLevel::Fatal,
         message: format!("Expected type '{}', '{}' given", r#type, given,),
         line,
     }
@@ -29,14 +29,14 @@ pub fn cannot_use_type_as_default_value_for_property_of_type(
 		);
 
         return PhpError {
-            level: crate::php_value::value::ErrorLevel::Fatal,
+            level: crate::php_value::types::ErrorLevel::Fatal,
             message: err,
             line,
         };
     }
 
     PhpError {
-        level: crate::php_value::value::ErrorLevel::Fatal,
+        level: crate::php_value::types::ErrorLevel::Fatal,
         message: format!(
             "Cannot use {} as default value for property {}::{} of type {}",
             bad_type, class_name, property_name, expected_type

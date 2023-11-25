@@ -9,8 +9,8 @@ use php_parser_rs::lexer::token::Span;
 use crate::{
     helpers::get_string_from_bytes,
     php_value::{
-        php_object::PhpObject,
-        value::{ErrorLevel, PhpError, PhpValue},
+        objects::{PhpClass, PhpObject},
+        types::{ErrorLevel, PhpError, PhpValue},
     },
 };
 
@@ -29,7 +29,7 @@ pub struct Environment {
 
     tracked_changes: TrackedChanges,
 
-    classes: HashMap<Vec<u8>, PhpObject>,
+    objects: HashMap<Vec<u8>, PhpObject>,
 }
 
 #[derive(Clone)]
@@ -63,7 +63,7 @@ impl Environment {
             identifiers: HashMap::new(),
             trace: false,
             tracked_changes: TrackedChanges::new(),
-            classes: HashMap::new(),
+            objects: HashMap::new(),
         }
     }
 
@@ -184,27 +184,44 @@ impl Environment {
         }
     }
 
+    pub fn object_exists(&self, ident: &[u8]) -> bool {
+        self.objects.contains_key(ident)
+    }
+
     pub fn new_class(&mut self, name: &[u8], value: PhpObject, span: Span) -> Option<PhpError> {
-        match self.classes.entry(name.to_vec()) {
-            std::collections::hash_map::Entry::Occupied(entry) => Some(PhpError {
+        if self.object_exists(name) {
+            Some(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
-                    "Cannot redeclare class {} because the name is already in use",
-                    get_string_from_bytes(entry.key())
+                    "Cannot declare class {} because the name is already in use",
+                    get_string_from_bytes(name)
                 ),
                 line: span.line,
-            }),
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                entry.insert(value);
+            })
+        } else {
+            self.objects.insert(name.to_vec(), value);
 
-                self.tracked_changes.added_classes.push(name.to_vec());
+            self.tracked_changes.added_classes.push(name.to_vec());
 
-                None
-            }
+            None
         }
     }
 
-    pub fn get_class(&self, ident: &[u8]) -> Option<PhpObject> {
-        self.classes.get(ident).cloned()
+    /// Retrieves the PHP class with the specified name if it exists.
+    ///
+    /// # Arguments
+    ///
+    /// * `ident`: A slice of bytes representing the name of the class to be retrieved.
+    ///
+    /// # Returns
+    ///
+    /// Returns an `Option` containing the requested `PhpClass` if the class exists; otherwise, returns `None`.
+    /// Returns `None` if the conversion to `PhpClass` fails.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the specified class name does not exist in the current environment.
+    pub fn get_class(&self, ident: &[u8]) -> Option<PhpClass> {
+        self.objects.get(ident).cloned().unwrap().as_class()
     }
 }

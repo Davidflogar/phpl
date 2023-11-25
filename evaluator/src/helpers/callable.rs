@@ -1,9 +1,11 @@
-use php_parser_rs::parser::ast::data_type::Type;
+use php_parser_rs::parser::ast::{data_type::Type, functions::FunctionParameterList};
 
 use crate::{
     errors,
-    php_value::value::{PhpError, PhpValue},
+    php_value::types::{CallableArgument, PhpError, PhpValue, ErrorLevel}, evaluator::Evaluator,
 };
+
+use super::get_string_from_bytes;
 
 /// Checks if a PHP value matches a type.
 ///
@@ -208,4 +210,50 @@ pub fn php_value_matches_type(
         Type::SelfReference(_) => todo!(),
         Type::ParentReference(_) => todo!(),
     }
+}
+
+pub fn parse_function_parameter_list(
+    params: FunctionParameterList,
+	evaluator: &mut Evaluator
+) -> Result<Vec<CallableArgument>, PhpError> {
+	let mut callable_args = vec![];
+
+    for arg in params {
+        let mut default_value: Option<PhpValue> = None;
+
+        if arg.default.is_some() && arg.data_type.is_some() {
+            let mut default_expression = evaluator.eval_expression(&arg.default.unwrap())?;
+            let default_data_type = arg.data_type.clone().unwrap();
+
+            // TODO: The data type conversion should not be done in this case
+            // and only the actual data type should be accepted.
+            let is_not_valid =
+                php_value_matches_type(&default_data_type, &mut default_expression, 0);
+
+            if is_not_valid.is_some() {
+                return Err(PhpError {
+                    level: ErrorLevel::Fatal,
+                    message: format!(
+                        "Cannot use {} as default value for parameter {} of type {}",
+                        default_expression.get_type_as_string(),
+                        get_string_from_bytes(&arg.name.name.bytes),
+                        default_data_type
+                    ),
+                    line: default_data_type.first_span().line,
+                });
+            }
+
+            default_value = Some(default_expression);
+        }
+
+        callable_args.push(CallableArgument {
+            name: arg.name,
+            data_type: arg.data_type,
+            pass_by_reference: arg.ampersand.is_some(),
+            default_value,
+            ellipsis: arg.ellipsis.is_some(),
+        });
+    }
+
+	Ok(callable_args)
 }

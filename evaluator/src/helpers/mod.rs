@@ -5,7 +5,7 @@ use php_parser_rs::{
 
 use crate::{
     evaluator::Evaluator,
-    php_value::value::{PhpError, PhpValue},
+    php_value::types::{PhpError, PhpValue},
 };
 
 pub mod callable;
@@ -51,7 +51,7 @@ pub fn parse_php_file(
                 // the error is not modified when calling get_message() twice on the same error.
 
                 let new_warning = PhpError {
-                    level: crate::php_value::value::ErrorLevel::Raw,
+                    level: crate::php_value::types::ErrorLevel::Raw,
                     message: format!(
                         "PHP Warning: {} in {} on line {}",
                         warning.message, input, warning.line
@@ -74,7 +74,7 @@ pub fn parse_php_file(
             }
 
             Err(PhpError {
-                level: crate::php_value::value::ErrorLevel::Raw,
+                level: crate::php_value::types::ErrorLevel::Raw,
                 message: format!("PHP Parse Error in {}: {}", input, err.unwrap()),
                 line: 0,
             })

@@ -14,7 +14,7 @@ use php_parser_rs::parser::ast::Statement;
 use crate::helpers::callable::php_value_matches_type;
 use crate::helpers::get_string_from_bytes;
 
-use super::php_object::PhpObject;
+use super::objects::PhpObject;
 
 pub const NULL: &str = "null";
 pub const BOOL: &str = "bool";
