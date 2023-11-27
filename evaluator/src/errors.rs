@@ -1,7 +1,12 @@
 //! This file contains commonly used functions that return errors.
 //! Only include functions that are intended to be used more than once.
 
-use crate::php_value::types::{PhpError, NULL};
+use php_parser_rs::lexer::byte_string::ByteString;
+
+use crate::{
+    helpers::get_string_from_bytes,
+    php_value::types::{PhpError, NULL},
+};
 
 pub fn expected_type_but_got(r#type: &str, given: String, line: usize) -> PhpError {
     PhpError {
@@ -40,6 +45,30 @@ pub fn cannot_use_type_as_default_value_for_property_of_type(
         message: format!(
             "Cannot use {} as default value for property {}::{} of type {}",
             bad_type, class_name, property_name, expected_type
+        ),
+        line,
+    }
+}
+
+pub fn cannot_redeclare_method(class_name: &str, method: ByteString, line: usize) -> PhpError {
+    PhpError {
+        level: crate::php_value::types::ErrorLevel::Fatal,
+        message: format!(
+            "Cannot redeclare {}::{}()",
+            class_name,
+            get_string_from_bytes(&method.bytes),
+        ),
+        line,
+    }
+}
+
+pub fn cannot_redeclare_property(class_name: &str, property: ByteString, line: usize) -> PhpError {
+    PhpError {
+        level: crate::php_value::types::ErrorLevel::Fatal,
+        message: format!(
+            "Cannot redeclare {}::{}",
+            class_name,
+            get_string_from_bytes(&property.bytes),
         ),
         line,
     }

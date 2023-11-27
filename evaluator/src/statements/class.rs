@@ -6,6 +6,7 @@ use php_parser_rs::parser::ast::{
 };
 
 use crate::{
+    errors::{cannot_redeclare_method, cannot_redeclare_property},
     evaluator::Evaluator,
     helpers::{
         callable::parse_function_parameter_list, get_string_from_bytes,
@@ -22,6 +23,7 @@ use crate::{
 
 pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<PhpValue, PhpError> {
     let mut parent = None;
+    let class_name = get_string_from_bytes(&class.name.value.bytes);
 
     // get the parent if any
     if let Some(extends) = class.extends {
@@ -46,12 +48,25 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     let mut properties = HashMap::new();
     let mut consts = HashMap::new();
     let mut abstract_methods = HashMap::new();
+    let mut abstract_constructor: Option<PhpObjectAbstractMethod> = None;
 
     // TODO: avoid so many calls to clone()
     for member in class.body.members {
         match member {
             ClassMember::Constant(constant) => {
                 for entry in constant.entries {
+                    if consts.contains_key(&entry.name.value.bytes) {
+                        return Err(PhpError {
+                            level: ErrorLevel::Fatal,
+                            message: format!(
+                                "Cannot redefine class constant {}::{}",
+                                class_name,
+                                get_string_from_bytes(&entry.name.value.bytes)
+                            ),
+                            line: entry.name.span.line,
+                        });
+                    }
+
                     let attributes = constant.attributes.clone();
                     let modifiers = constant.modifiers.clone();
 
@@ -77,6 +92,14 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                             equals,
                             value,
                         } => {
+                            if properties.contains_key(&variable.name.bytes) {
+                                return Err(cannot_redeclare_property(
+                                    &class_name,
+                                    variable.name,
+                                    variable.span.line,
+                                ));
+                            }
+
                             let expr_value = evaluator.eval_expression(&value)?;
 
                             let not_valid = property_has_valid_default_value(
@@ -102,6 +125,14 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                             properties.insert(variable.name.bytes, property);
                         }
                         PropertyEntry::Uninitialized { variable } => {
+                            if properties.contains_key(&variable.name.bytes) {
+                                return Err(cannot_redeclare_property(
+                                    &class_name,
+                                    variable.name,
+                                    variable.span.line,
+                                ));
+                            }
+
                             let property = PhpObjectProperty {
                                 attributes,
                                 modifiers,
@@ -116,20 +147,46 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                 }
             }
             ClassMember::AbstractMethod(method) => {
-                let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
+                if abstract_methods.contains_key(&method.name.value.bytes) {
+                    return Err(cannot_redeclare_method(
+                        &class_name,
+                        method.name.value,
+                        method.name.span.line,
+                    ));
+                }
 
-                let name = method.name.value.bytes.clone();
+                let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
 
                 let abstract_method = PhpObjectAbstractMethod {
                     attributes: method.attributes,
                     modifiers: method.modifiers,
                     return_by_reference: method.ampersand.is_some(),
-                    name: method.name,
+                    name: method.name.clone(),
                     parameters: method_args,
                     return_type: method.return_type,
                 };
 
-                abstract_methods.insert(name, abstract_method);
+                abstract_methods.insert(method.name.value.bytes, abstract_method);
+            }
+            ClassMember::AbstractConstructor(constructor) => {
+                if abstract_constructor.is_some() {
+                    return Err(cannot_redeclare_method(
+                        &class_name,
+                        constructor.name.value,
+                        constructor.name.span.line,
+                    ));
+                }
+
+                let method_args = parse_function_parameter_list(constructor.parameters, evaluator)?;
+
+                abstract_constructor = Some(PhpObjectAbstractMethod {
+                    attributes: constructor.attributes,
+                    modifiers: constructor.modifiers,
+                    return_by_reference: constructor.ampersand.is_some(),
+                    name: constructor.name,
+                    parameters: method_args,
+                    return_type: None,
+                })
             }
             _ => todo!(),
         }
@@ -145,6 +202,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
             class.modifiers,
             class.attributes,
             abstract_methods,
+            abstract_constructor,
         ))
     } else {
         PhpObject::Class(PhpClass::new(

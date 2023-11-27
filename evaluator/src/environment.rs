@@ -222,6 +222,6 @@ impl Environment {
     ///
     /// Panics if the specified class name does not exist in the current environment.
     pub fn get_class(&self, ident: &[u8]) -> Option<PhpClass> {
-        self.objects.get(ident).cloned().unwrap().as_class()
+        self.objects.get(ident).cloned().unwrap().into_class()
     }
 }

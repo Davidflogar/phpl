@@ -44,8 +44,8 @@ pub struct Evaluator<'a> {
 
     pub warnings: Vec<PhpError>,
 
-    pub included_files: Vec<String>,
-    pub required_files: Vec<String>,
+    pub included_files: Vec<String>, // TODO: change the data type to a fixed and immutable string
+    pub required_files: Vec<String>, // TODO: change the data type to a fixed and immutable string
 }
 
 impl<'a> Evaluator<'a> {
@@ -633,9 +633,9 @@ impl<'a> Evaluator<'a> {
 
                 let right_expr_value = self.eval_expression(&instanceof.right)?;
 
-				// TODO: remove the unwrap
+                // TODO: remove the unwrap
                 let is_instance_of = left_object
-                    .as_class()
+                    .into_class()
                     .unwrap()
                     .instance_of(right_expr_value);
 
@@ -956,9 +956,9 @@ impl<'a> Evaluator<'a> {
             ));
         }
 
-        let real_path = path_as_string.unwrap_or("".to_string());
+        let real_relative_path = path_as_string.unwrap_or("".to_string());
 
-        if real_path.is_empty() {
+        if real_relative_path.is_empty() {
             let error = "Path cannot be empty".to_string();
 
             return Err(PhpError {
@@ -968,22 +968,41 @@ impl<'a> Evaluator<'a> {
             });
         }
 
-        if once && self.included_files.iter().any(|i| *i == real_path) {
+        let real_abs_path = fs::canonicalize(&real_relative_path);
+
+        let fn_name = if once { "include_once" } else { "include" };
+
+        if let Err(error) = real_abs_path {
+            let error = PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "{}({}): Failed to open stream: {}",
+                    fn_name, real_relative_path, error
+                ),
+                line: span.line,
+            };
+
+            self.warnings.push(error);
+
+            return Ok(NULL);
+        }
+
+		let ok_abs_path = real_abs_path.unwrap();
+
+        let path = ok_abs_path.to_str().unwrap();
+
+        if once && self.included_files.iter().any(|i| *i == path) {
             return Ok(PhpValue::Bool(true));
         }
 
-        let content = fs::read_to_string(&real_path);
+        let content = fs::read_to_string(&path);
 
-        if content.is_err() {
-            let fn_name = if once { "include_once" } else { "include" };
-
+        if let Err(error) = content {
             let warning = PhpError {
                 level: ErrorLevel::Warning,
                 message: format!(
                     "{}({}): Failed to open stream: {}",
-                    fn_name,
-                    real_path,
-                    content.unwrap_err()
+                    fn_name, path, error
                 ),
                 line: span.line,
             };
@@ -993,9 +1012,9 @@ impl<'a> Evaluator<'a> {
             return Ok(NULL);
         }
 
-        self.included_files.push(real_path.clone());
+        self.included_files.push(path.to_string());
 
-        parse_php_file(self, &real_path, &content.unwrap())
+        parse_php_file(self, &path, &content.unwrap())
     }
 
     fn handle_require(
@@ -1015,9 +1034,9 @@ impl<'a> Evaluator<'a> {
             ));
         }
 
-        let real_path = path_as_string.unwrap_or("".to_string());
+        let real_relative_path = path_as_string.unwrap_or("".to_string());
 
-        if real_path.is_empty() {
+        if real_relative_path.is_empty() {
             let error = "Path cannot be empty".to_string();
 
             return Err(PhpError {
@@ -1027,22 +1046,16 @@ impl<'a> Evaluator<'a> {
             });
         }
 
-        if once && self.required_files.iter().any(|i| *i == real_path) {
-            return Ok(PhpValue::Bool(true));
-        }
+        let real_abs_path = fs::canonicalize(&real_relative_path);
 
-        let content = fs::read_to_string(&real_path);
+        let fn_name = if once { "require_once" } else { "require" };
 
-        if content.is_err() {
-            let fn_name = if once { "require_once" } else { "require" };
-
+        if let Err(error) = real_abs_path {
             let error = PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "{}({}): Failed to open stream: {}",
-                    fn_name,
-                    real_path,
-                    content.unwrap_err()
+                    fn_name, real_relative_path, error
                 ),
                 line: span.line,
             };
@@ -1052,8 +1065,30 @@ impl<'a> Evaluator<'a> {
             return Ok(NULL);
         }
 
-        self.required_files.push(real_path.clone());
+        let ok_abs_path = real_abs_path.unwrap();
 
-        parse_php_file(self, &real_path, &content.unwrap())
+        let path = ok_abs_path.to_str().unwrap();
+
+        if once && self.required_files.iter().any(|i| *i == path) {
+            return Ok(PhpValue::Bool(true));
+        }
+
+        let content = fs::read_to_string(&path);
+
+        if let Err(error) = content {
+            let error = PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!("{}({}): Failed to open stream: {}", fn_name, path, error),
+                line: span.line,
+            };
+
+            self.warnings.push(error);
+
+            return Ok(NULL);
+        }
+
+        self.required_files.push(path.to_string());
+
+        parse_php_file(self, &path, &content.unwrap())
     }
 }

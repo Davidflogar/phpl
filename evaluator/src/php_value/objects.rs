@@ -75,6 +75,7 @@ pub struct PhpAbstractClass {
     pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
     pub traits: Vec<SimpleIdentifier>,
     pub abstract_methods: HashMap<Vec<u8>, PhpObjectAbstractMethod>,
+	pub abstract_constructor: Option<PhpObjectAbstractMethod>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +90,7 @@ pub struct PhpObjectAbstractMethod {
 
 impl PhpObject {
     /// Returns the class if the object is a class, otherwise returns None.
-    pub fn as_class(self) -> Option<PhpClass> {
+    pub fn into_class(self) -> Option<PhpClass> {
         if let PhpObject::Class(class) = self {
             return Some(class);
         }
@@ -154,6 +155,7 @@ impl PhpAbstractClass {
         modifiers: ClassModifierGroup,
         attributes: Vec<AttributeGroup>,
         abstract_methods: HashMap<Vec<u8>, PhpObjectAbstractMethod>,
+		abstract_constructor: Option<PhpObjectAbstractMethod>,
     ) -> PhpAbstractClass {
         PhpAbstractClass {
             name,
@@ -164,6 +166,7 @@ impl PhpAbstractClass {
             consts,
             traits: vec![],
             abstract_methods,
+			abstract_constructor,
         }
     }
 }

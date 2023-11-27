@@ -67,7 +67,7 @@ pub fn parse_php_file(
             Ok(last_result)
         }
         Err(err) => {
-            let err = err.report(content, Some(input), false, false);
+            let err = err.report(content, Some(input), true, false);
 
             if err.is_err() {
                 panic!("{}", err.unwrap_err());
