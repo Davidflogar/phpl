@@ -5,7 +5,7 @@ use php_parser_rs::parser::ast::{arguments::Argument, FunctionCallExpression};
 use crate::{
     evaluator::Evaluator,
     helpers::get_string_from_bytes,
-    php_value::types::{CallableArgument, ErrorLevel, PhpError, PhpValue},
+    php_value::primitive_data_types::{CallableArgument, ErrorLevel, PhpError, PhpValue},
 };
 
 pub fn expression(
@@ -17,9 +17,9 @@ pub fn expression(
     // get the target
     let target = evaluator.eval_expression(&call.target)?;
 
-    let target_to_string = target.printable();
+    let target_as_string = target.printable();
 
-    if target_to_string.is_none() {
+    if target_as_string.is_none() {
         evaluator.warnings.push(PhpError {
             level: ErrorLevel::Warning,
             message: format!(
@@ -30,7 +30,7 @@ pub fn expression(
         });
     }
 
-    let target_name = target_to_string.unwrap();
+    let target_name = target_as_string.unwrap();
 
     let target_name_as_vec = target_name.as_bytes().to_vec();
 
@@ -174,7 +174,7 @@ pub fn expression(
 
             let is_not_valid = self_arg.is_valid(&mut value, called_in_line);
 
-            if let Some(mut error) = is_not_valid  {
+            if let Some(mut error) = is_not_valid {
                 error.message = format!(
                     "{}(): Argument #{} ({}): {}",
                     target_name,
@@ -191,8 +191,8 @@ pub fn expression(
             final_function_parameters.insert(key, value);
         }
 
-        for noa in required_arguments.iter() {
-            if noa.default_value.is_none() {
+        for required_arg in required_arguments.iter() {
+            if required_arg.default_value.is_none() {
                 return Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: format!(
@@ -205,8 +205,10 @@ pub fn expression(
                 });
             }
 
-            final_function_parameters
-                .insert(noa.name.name.to_vec(), noa.default_value.clone().unwrap());
+            final_function_parameters.insert(
+                required_arg.name.name.to_vec(),
+                required_arg.default_value.clone().unwrap(),
+            );
         }
     }
 

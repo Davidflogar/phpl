@@ -10,7 +10,7 @@ use crate::{
     helpers::get_string_from_bytes,
     php_value::{
         objects::{PhpClass, PhpObject},
-        types::{ErrorLevel, PhpError, PhpValue},
+        primitive_data_types::{ErrorLevel, PhpError, PhpValue},
     },
 };
 

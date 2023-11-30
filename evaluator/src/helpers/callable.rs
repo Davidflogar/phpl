@@ -1,8 +1,9 @@
 use php_parser_rs::parser::ast::{data_type::Type, functions::FunctionParameterList};
 
 use crate::{
-    errors,
-    php_value::types::{CallableArgument, PhpError, PhpValue, ErrorLevel}, evaluator::Evaluator,
+    errors::{self, cannot_use_default_value_for_parameter},
+    evaluator::Evaluator,
+    php_value::primitive_data_types::{CallableArgument, PhpError, PhpValue},
 };
 
 use super::get_string_from_bytes;
@@ -214,12 +215,12 @@ pub fn php_value_matches_type(
 
 pub fn parse_function_parameter_list(
     params: FunctionParameterList,
-	evaluator: &mut Evaluator
+    evaluator: &mut Evaluator,
 ) -> Result<Vec<CallableArgument>, PhpError> {
-	let mut callable_args = vec![];
+    let mut callable_args = vec![];
 
     for arg in params {
-        let mut default_value: Option<PhpValue> = None;
+        let mut default_value = None;
 
         if arg.default.is_some() && arg.data_type.is_some() {
             let mut default_expression = evaluator.eval_expression(&arg.default.unwrap())?;
@@ -231,16 +232,12 @@ pub fn parse_function_parameter_list(
                 php_value_matches_type(&default_data_type, &mut default_expression, 0);
 
             if is_not_valid.is_some() {
-                return Err(PhpError {
-                    level: ErrorLevel::Fatal,
-                    message: format!(
-                        "Cannot use {} as default value for parameter {} of type {}",
-                        default_expression.get_type_as_string(),
-                        get_string_from_bytes(&arg.name.name.bytes),
-                        default_data_type
-                    ),
-                    line: default_data_type.first_span().line,
-                });
+                return Err(cannot_use_default_value_for_parameter(
+                    default_expression.get_type_as_string(),
+                    get_string_from_bytes(&arg.name.name.bytes),
+                    default_data_type.to_string(),
+                    default_data_type.first_span().line,
+                ));
             }
 
             default_value = Some(default_expression);
@@ -249,11 +246,9 @@ pub fn parse_function_parameter_list(
         callable_args.push(CallableArgument {
             name: arg.name,
             data_type: arg.data_type,
-            pass_by_reference: arg.ampersand.is_some(),
             default_value,
-            ellipsis: arg.ellipsis.is_some(),
         });
     }
 
-	Ok(callable_args)
+    Ok(callable_args)
 }

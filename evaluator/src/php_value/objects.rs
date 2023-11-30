@@ -3,10 +3,11 @@ use std::collections::HashMap;
 use php_parser_rs::parser::ast::{
     attributes::AttributeGroup,
     data_type::Type,
-    functions::ReturnType,
+    functions::{MethodBody, ReturnType},
     identifiers::SimpleIdentifier,
     modifiers::{
-        ClassModifierGroup, ConstantModifierGroup, MethodModifierGroup, PropertyModifierGroup,
+        ClassModifierGroup, ConstantModifierGroup, MethodModifierGroup,
+        PromotedPropertyModifierGroup, PropertyModifierGroup,
     },
 };
 
@@ -16,7 +17,7 @@ use super::macros::impl_extend_for_php_objects;
 
 impl_extend_for_php_objects!(PhpClass, PhpAbstractClass);
 
-use super::types::{CallableArgument, ErrorLevel, PhpError, PhpValue};
+use super::primitive_data_types::{CallableArgument, ErrorLevel, PhpError, PhpValue};
 
 #[derive(Debug, Clone)]
 pub enum PhpObject {
@@ -40,13 +41,10 @@ pub struct PhpClass {
     pub attributes: Vec<AttributeGroup>,
     pub parent: Option<Box<PhpClass>>,
     pub properties: HashMap<Vec<u8>, PhpObjectProperty>,
-    // TODO: pub implements: Vec<SimpleIdentifier>,
     pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
     pub traits: Vec<SimpleIdentifier>,
-    // TODO: pub variable property
-    // TODO: abstract constructor
-    // TODO: concrete method
-    // TODO: concrete constructor
+    pub concrete_methods: HashMap<Vec<u8>, PhpObjectConcreteMethod>,
+    pub concrete_constructor: Option<PhpObjectConcreteConstructor>,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +64,48 @@ pub struct PhpObjectConstant {
 }
 
 #[derive(Debug, Clone)]
+pub struct PhpObjectConcreteMethod {
+    pub attributes: Vec<AttributeGroup>,
+    pub modifiers: MethodModifierGroup,
+    pub return_by_reference: bool,
+    pub name: SimpleIdentifier,
+    pub parameters: Vec<CallableArgument>,
+    pub return_type: Option<ReturnType>,
+    pub body: MethodBody,
+}
+
+#[derive(Debug, Clone)]
+pub struct PhpObjectConcreteConstructor {
+    pub attributes: Vec<AttributeGroup>,
+    pub modifiers: MethodModifierGroup,
+    pub return_by_reference: bool,
+    pub name: SimpleIdentifier,
+    pub parameters: Vec<ConstructorParameter>,
+    pub return_type: Option<ReturnType>,
+    pub body: MethodBody,
+}
+
+#[derive(Debug, Clone)]
+pub enum ConstructorParameter {
+    PromotedProperty {
+		attributes: Vec<AttributeGroup>,
+		pass_by_reference: bool,
+		name: Vec<u8>,
+		data_type: Option<Type>,
+		default: Option<PhpValue>,
+		modifiers: PromotedPropertyModifierGroup,
+    },
+    Normal {
+		attributes: Vec<AttributeGroup>,
+		pass_by_reference: bool,
+		name: Vec<u8>,
+		data_type: Option<Type>,
+		ellipsis: bool,
+		default: Option<PhpValue>,
+    },
+}
+
+#[derive(Debug, Clone)]
 pub struct PhpAbstractClass {
     pub name: SimpleIdentifier,
     pub modifiers: ClassModifierGroup,
@@ -75,7 +115,9 @@ pub struct PhpAbstractClass {
     pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
     pub traits: Vec<SimpleIdentifier>,
     pub abstract_methods: HashMap<Vec<u8>, PhpObjectAbstractMethod>,
-	pub abstract_constructor: Option<PhpObjectAbstractMethod>,
+    pub abstract_constructor: Option<PhpObjectAbstractMethod>,
+    pub concrete_methods: HashMap<Vec<u8>, PhpObjectConcreteMethod>,
+    pub concrete_constructor: Option<PhpObjectConcreteConstructor>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,23 +142,6 @@ impl PhpObject {
 }
 
 impl PhpClass {
-    pub fn new(
-        name: SimpleIdentifier,
-        properties: HashMap<Vec<u8>, PhpObjectProperty>,
-        consts: HashMap<Vec<u8>, PhpObjectConstant>,
-        modifiers: ClassModifierGroup,
-        attributes: Vec<AttributeGroup>,
-    ) -> PhpClass {
-        PhpClass {
-            name,
-            modifiers,
-            attributes,
-            parent: None,
-            properties,
-            consts,
-            traits: vec![],
-        }
-    }
 
     pub fn instance_of(self, object: PhpValue) -> Result<bool, PhpError> {
         if let PhpValue::Object(object) = object {
@@ -143,30 +168,6 @@ impl PhpClass {
                 message: "Right side of instanceof must be an object".to_string(),
                 line: 0,
             })
-        }
-    }
-}
-
-impl PhpAbstractClass {
-    pub fn new(
-        name: SimpleIdentifier,
-        properties: HashMap<Vec<u8>, PhpObjectProperty>,
-        consts: HashMap<Vec<u8>, PhpObjectConstant>,
-        modifiers: ClassModifierGroup,
-        attributes: Vec<AttributeGroup>,
-        abstract_methods: HashMap<Vec<u8>, PhpObjectAbstractMethod>,
-		abstract_constructor: Option<PhpObjectAbstractMethod>,
-    ) -> PhpAbstractClass {
-        PhpAbstractClass {
-            name,
-            modifiers,
-            attributes,
-            parent: None,
-            properties,
-            consts,
-            traits: vec![],
-            abstract_methods,
-			abstract_constructor,
         }
     }
 }

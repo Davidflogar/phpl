@@ -19,13 +19,13 @@ use php_parser_rs::{
 use crate::expressions::function_call;
 use crate::helpers::callable::parse_function_parameter_list;
 use crate::helpers::{get_string_from_bytes, parse_php_file};
-use crate::php_value::types::PhpCallable;
+use crate::php_value::primitive_data_types::PhpCallable;
 use crate::statements::class;
 use crate::warnings;
 use crate::{
     environment::Environment,
     helpers::get_span_from_var,
-    php_value::types::{ErrorLevel, PhpError, PhpValue},
+    php_value::primitive_data_types::{ErrorLevel, PhpError, PhpValue},
 };
 
 const NULL: PhpValue = PhpValue::Null;
@@ -337,14 +337,14 @@ impl<'a> Evaluator<'a> {
             Expression::AssignmentOperation(operation) => match operation {
                 AssignmentOperationExpression::Assign { left, right, .. } => {
                     let Expression::Variable(ref left_var) = **left else {
-						unreachable!()
+						todo!()
 					};
 
                     let left_var_name = self.get_variable_name(left_var)?;
 
                     if let Expression::Reference(ref reference) = **right {
                         let Expression::Variable(ref right_var) = *reference.right else {
-							unreachable!()
+							todo!()
 						};
 
                         let right_var_name = self.get_variable_name(right_var)?;
@@ -995,7 +995,7 @@ impl<'a> Evaluator<'a> {
             return Ok(PhpValue::Bool(true));
         }
 
-        let content = fs::read_to_string(&path);
+        let content = fs::read_to_string(path);
 
         if let Err(error) = content {
             let warning = PhpError {
@@ -1014,7 +1014,7 @@ impl<'a> Evaluator<'a> {
 
         self.included_files.push(path.to_string());
 
-        parse_php_file(self, &path, &content.unwrap())
+        parse_php_file(self, path, &content.unwrap())
     }
 
     fn handle_require(
@@ -1073,7 +1073,7 @@ impl<'a> Evaluator<'a> {
             return Ok(PhpValue::Bool(true));
         }
 
-        let content = fs::read_to_string(&path);
+        let content = fs::read_to_string(path);
 
         if let Err(error) = content {
             let error = PhpError {
@@ -1089,6 +1089,6 @@ impl<'a> Evaluator<'a> {
 
         self.required_files.push(path.to_string());
 
-        parse_php_file(self, &path, &content.unwrap())
+        parse_php_file(self, path, &content.unwrap())
     }
 }

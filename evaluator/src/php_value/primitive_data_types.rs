@@ -59,10 +59,6 @@ pub enum ErrorLevel {
     /// A Raw error should not be formatted with get_message().
     /// And it is for private use.
     Raw,
-    /*	Notice,
-    UserError,
-    UserWarning,
-    UserNotice, */
 }
 
 #[derive(Debug, Clone)]
@@ -85,8 +81,6 @@ pub struct CallableArgument {
     pub name: SimpleVariable,
     pub data_type: Option<Type>,
     pub default_value: Option<PhpValue>,
-    pub pass_by_reference: bool,
-    pub ellipsis: bool,
 }
 
 impl PhpValue {

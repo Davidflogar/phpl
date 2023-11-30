@@ -5,12 +5,12 @@ use php_parser_rs::lexer::byte_string::ByteString;
 
 use crate::{
     helpers::get_string_from_bytes,
-    php_value::types::{PhpError, NULL},
+    php_value::primitive_data_types::{ErrorLevel, PhpError, NULL},
 };
 
 pub fn expected_type_but_got(r#type: &str, given: String, line: usize) -> PhpError {
     PhpError {
-        level: crate::php_value::types::ErrorLevel::Fatal,
+        level: ErrorLevel::Fatal,
         message: format!("Expected type '{}', '{}' given", r#type, given,),
         line,
     }
@@ -34,14 +34,14 @@ pub fn cannot_use_type_as_default_value_for_property_of_type(
 		);
 
         return PhpError {
-            level: crate::php_value::types::ErrorLevel::Fatal,
+            level: ErrorLevel::Fatal,
             message: err,
             line,
         };
     }
 
     PhpError {
-        level: crate::php_value::types::ErrorLevel::Fatal,
+        level: ErrorLevel::Fatal,
         message: format!(
             "Cannot use {} as default value for property {}::{} of type {}",
             bad_type, class_name, property_name, expected_type
@@ -52,7 +52,7 @@ pub fn cannot_use_type_as_default_value_for_property_of_type(
 
 pub fn cannot_redeclare_method(class_name: &str, method: ByteString, line: usize) -> PhpError {
     PhpError {
-        level: crate::php_value::types::ErrorLevel::Fatal,
+        level: ErrorLevel::Fatal,
         message: format!(
             "Cannot redeclare {}::{}()",
             class_name,
@@ -64,11 +64,27 @@ pub fn cannot_redeclare_method(class_name: &str, method: ByteString, line: usize
 
 pub fn cannot_redeclare_property(class_name: &str, property: ByteString, line: usize) -> PhpError {
     PhpError {
-        level: crate::php_value::types::ErrorLevel::Fatal,
+        level: ErrorLevel::Fatal,
         message: format!(
             "Cannot redeclare {}::{}",
             class_name,
             get_string_from_bytes(&property.bytes),
+        ),
+        line,
+    }
+}
+
+pub fn cannot_use_default_value_for_parameter(
+    bad_type: String,
+    parameter_name: String,
+    default_data_type: String,
+    line: usize,
+) -> PhpError {
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!(
+            "Cannot use {} as default value for parameter {} of type {}",
+            bad_type, parameter_name, default_data_type
         ),
         line,
     }

@@ -6,18 +6,22 @@ use php_parser_rs::parser::ast::{
 };
 
 use crate::{
-    errors::{cannot_redeclare_method, cannot_redeclare_property},
+    errors::{
+        cannot_redeclare_method, cannot_redeclare_property, cannot_use_default_value_for_parameter,
+    },
     evaluator::Evaluator,
     helpers::{
-        callable::parse_function_parameter_list, get_string_from_bytes,
+        callable::{parse_function_parameter_list, php_value_matches_type},
+        get_string_from_bytes,
         object::property_has_valid_default_value,
     },
     php_value::{
         objects::{
-            PhpAbstractClass, PhpClass, PhpObject, PhpObjectAbstractMethod, PhpObjectConstant,
+            ConstructorParameter, PhpAbstractClass, PhpClass, PhpObject, PhpObjectAbstractMethod,
+            PhpObjectConcreteConstructor, PhpObjectConcreteMethod, PhpObjectConstant,
             PhpObjectProperty,
         },
-        types::{ErrorLevel, PhpError, PhpValue},
+        primitive_data_types::{ErrorLevel, PhpError, PhpValue},
     },
 };
 
@@ -49,6 +53,8 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     let mut consts = HashMap::new();
     let mut abstract_methods = HashMap::new();
     let mut abstract_constructor: Option<PhpObjectAbstractMethod> = None;
+    let mut concrete_methods = HashMap::new();
+    let mut concrete_constructor: Option<PhpObjectConcreteConstructor> = None;
 
     // TODO: avoid so many calls to clone()
     for member in class.body.members {
@@ -188,6 +194,102 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                     return_type: None,
                 })
             }
+            ClassMember::ConcreteMethod(method) => {
+                if concrete_methods.contains_key(&method.name.value.bytes) {
+                    return Err(cannot_redeclare_method(
+                        &class_name,
+                        method.name.value,
+                        method.name.span.line,
+                    ));
+                }
+
+                let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
+
+                concrete_methods.insert(
+                    method.name.value.bytes.clone(),
+                    PhpObjectConcreteMethod {
+                        attributes: method.attributes,
+                        modifiers: method.modifiers,
+                        return_by_reference: method.ampersand.is_some(),
+                        name: method.name,
+                        parameters: method_args,
+                        return_type: method.return_type,
+                        body: method.body,
+                    },
+                );
+            }
+            ClassMember::ConcreteConstructor(constructor) => {
+                if concrete_constructor.is_some() {
+                    return Err(cannot_redeclare_method(
+                        &class_name,
+                        constructor.name.value,
+                        constructor.name.span.line,
+                    ));
+                }
+
+                let mut args = vec![];
+
+                for param in constructor.parameters.parameters {
+                    if properties.contains_key(&param.name.name.bytes) {
+                        return Err(cannot_redeclare_property(
+                            &class_name,
+                            param.name.name,
+                            param.name.span.line,
+                        ));
+                    }
+
+                    let default_value_expression = param.default;
+                    let data_type = param.data_type.clone();
+                    let default_value = None;
+
+                    if let (Some(default), Some(r#type)) = (default_value_expression, data_type) {
+                        let mut php_value = evaluator.eval_expression(&default)?;
+
+                        let err =
+                            php_value_matches_type(&r#type, &mut php_value, param.name.span.line);
+
+                        if err.is_some() {
+                            return Err(cannot_use_default_value_for_parameter(
+                                php_value.get_type_as_string(),
+                                get_string_from_bytes(&param.name.name.bytes),
+                                r#type.to_string(),
+                                param.name.span.line,
+                            ));
+                        }
+                    }
+
+                    if !param.modifiers.is_empty() {
+                        // it is a promoted property
+                        args.push(ConstructorParameter::PromotedProperty {
+                            attributes: param.attributes,
+                            pass_by_reference: param.ampersand.is_some(),
+                            name: param.name.name.bytes,
+                            data_type: param.data_type,
+                            default: default_value,
+                            modifiers: param.modifiers,
+                        });
+                    } else {
+                        args.push(ConstructorParameter::Normal {
+                            attributes: param.attributes,
+                            pass_by_reference: param.ampersand.is_some(),
+                            name: param.name.name.bytes,
+                            data_type: param.data_type,
+                            default: default_value,
+                            ellipsis: param.ellipsis.is_some(),
+                        });
+                    }
+                }
+
+                concrete_constructor = Some(PhpObjectConcreteConstructor {
+                    attributes: constructor.attributes.clone(),
+                    modifiers: constructor.modifiers.clone(),
+                    return_by_reference: constructor.ampersand.is_some(),
+                    name: constructor.name.clone(),
+                    parameters: args,
+                    return_type: None,
+                    body: constructor.body.clone(),
+                })
+            }
             _ => todo!(),
         }
     }
@@ -195,23 +297,31 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     let has_abstract = class.modifiers.has_abstract();
 
     let mut new_object = if has_abstract {
-        PhpObject::AbstractClass(PhpAbstractClass::new(
-            class.name.clone(),
+        PhpObject::AbstractClass(PhpAbstractClass {
+            name: class.name.clone(),
             properties,
             consts,
-            class.modifiers,
-            class.attributes,
+            modifiers: class.modifiers,
+            attributes: class.attributes,
+            parent: parent.clone(),
             abstract_methods,
             abstract_constructor,
-        ))
+            concrete_methods,
+            concrete_constructor,
+            traits: vec![],
+        })
     } else {
-        PhpObject::Class(PhpClass::new(
-            class.name.clone(),
+        PhpObject::Class(PhpClass {
+            name: class.name.clone(),
             properties,
             consts,
-            class.modifiers,
-            class.attributes,
-        ))
+            modifiers: class.modifiers,
+            attributes: class.attributes,
+            parent: parent.clone(),
+            concrete_methods,
+            concrete_constructor,
+            traits: vec![],
+        })
     };
 
     if let Some(parent_object) = parent {
@@ -221,8 +331,6 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
             return Err(error);
         }
     }
-
-    println!("{:#?}", new_object);
 
     let class_error = evaluator
         .env

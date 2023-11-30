@@ -1,5 +1,5 @@
 pub mod objects;
-pub mod types;
+pub mod primitive_data_types;
 
 mod macros {
 	macro_rules! impl_extend_for_php_objects {
@@ -10,7 +10,7 @@ mod macros {
 					pub fn extend(&mut self, parent: &PhpClass) -> Option<PhpError> {
 						if parent.modifiers.has_final() {
 							return Some(PhpError {
-								level: super::types::ErrorLevel::Fatal,
+								level: super::primitive_data_types::ErrorLevel::Fatal,
 								message: format!(
 									"Class {} cannot extend final class {}",
 									get_string_from_bytes(&self.name.value.bytes),
