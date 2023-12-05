@@ -7,9 +7,10 @@ use std::{
 use php_parser_rs::lexer::token::Span;
 
 use crate::{
+    errors::cannot_redeclare_class,
     helpers::get_string_from_bytes,
     php_value::{
-        objects::{PhpClass, PhpObject},
+        objects::PhpObject,
         primitive_data_types::{ErrorLevel, PhpError, PhpValue},
     },
 };
@@ -42,7 +43,7 @@ pub struct TrackedChanges {
     /// It is a map from the variable name to the value of the variable before the modification.
     pub modified_vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
 
-    pub added_classes: Vec<Vec<u8>>,
+    pub added_objects: Vec<Vec<u8>>,
 }
 
 impl TrackedChanges {
@@ -51,7 +52,7 @@ impl TrackedChanges {
             added_vars: Vec::new(),
             added_identifiers: Vec::new(),
             modified_vars: HashMap::new(),
-            added_classes: Vec::new(),
+            added_objects: Vec::new(),
         }
     }
 }
@@ -190,38 +191,19 @@ impl Environment {
 
     pub fn new_class(&mut self, name: &[u8], value: PhpObject, span: Span) -> Option<PhpError> {
         if self.object_exists(name) {
-            Some(PhpError {
-                level: ErrorLevel::Fatal,
-                message: format!(
-                    "Cannot declare class {} because the name is already in use",
-                    get_string_from_bytes(name)
-                ),
-                line: span.line,
-            })
+            Some(cannot_redeclare_class(name, span.line))
         } else {
             self.objects.insert(name.to_vec(), value);
 
-            self.tracked_changes.added_classes.push(name.to_vec());
+            if self.trace {
+                self.tracked_changes.added_objects.push(name.to_vec());
+            }
 
             None
         }
     }
 
-    /// Retrieves the PHP class with the specified name if it exists.
-    ///
-    /// # Arguments
-    ///
-    /// * `ident`: A slice of bytes representing the name of the class to be retrieved.
-    ///
-    /// # Returns
-    ///
-    /// Returns an `Option` containing the requested `PhpClass` if the class exists; otherwise, returns `None`.
-    /// Returns `None` if the conversion to `PhpClass` fails.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the specified class name does not exist in the current environment.
-    pub fn get_class(&self, ident: &[u8]) -> Option<PhpClass> {
-        self.objects.get(ident).cloned().unwrap().into_class()
+    pub fn get_object(&self, ident: &[u8]) -> Option<PhpObject> {
+        self.objects.get(ident).cloned()
     }
 }

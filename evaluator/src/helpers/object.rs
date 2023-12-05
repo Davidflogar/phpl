@@ -13,7 +13,6 @@ pub fn property_has_valid_default_value(
     class_name: &str,
     property_name: &str,
 ) -> Option<PhpError> {
-    r#type?;
 
     match r#type.unwrap() {
         Type::Named(_, _) => todo!(),

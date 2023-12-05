@@ -89,3 +89,22 @@ pub fn cannot_use_default_value_for_parameter(
         line,
     }
 }
+
+pub fn cannot_redeclare_class(name: &[u8], line: usize) -> PhpError {
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!(
+            "Cannot declare class {} because the name is already in use",
+            get_string_from_bytes(name)
+        ),
+        line,
+    }
+}
+
+pub fn redefinition_of_parameter(name: &[u8], line: usize) -> PhpError {
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!("Redefinition of parameter {}", get_string_from_bytes(name)),
+        line,
+    }
+}

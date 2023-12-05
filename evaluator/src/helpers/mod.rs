@@ -1,3 +1,5 @@
+use std::{collections::HashMap, hash::Hash};
+
 use php_parser_rs::{
     lexer::token::Span,
     parser::{self, ast::variables::Variable},
@@ -84,4 +86,13 @@ pub fn parse_php_file(
 
 pub fn get_string_from_bytes(var: &[u8]) -> String {
     String::from_utf8_lossy(var).to_string()
+}
+
+pub fn extend_hashmap_without_overwrite<T, V>(map: &mut HashMap<T, V>, other: HashMap<T, V>)
+where
+    T: Eq + Hash,
+{
+    for (key, value) in other {
+        map.entry(key).or_insert(value);
+    }
 }

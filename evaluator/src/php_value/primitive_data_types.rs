@@ -6,7 +6,6 @@ use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Not, Rem, Shl, Shr, Sub};
 use php_parser_rs::lexer::byte_string::ByteString;
 use php_parser_rs::lexer::token::Span;
 use php_parser_rs::parser::ast::attributes::AttributeGroup;
-use php_parser_rs::parser::ast::data_type::Type;
 use php_parser_rs::parser::ast::functions::ReturnType;
 use php_parser_rs::parser::ast::variables::SimpleVariable;
 use php_parser_rs::parser::ast::Statement;
@@ -15,6 +14,7 @@ use crate::helpers::callable::php_value_matches_type;
 use crate::helpers::get_string_from_bytes;
 
 use super::objects::PhpObject;
+use super::php_argument_type::PhpArgumentType;
 
 pub const NULL: &str = "null";
 pub const BOOL: &str = "bool";
@@ -79,8 +79,43 @@ pub struct PhpCallable {
 #[derive(Debug, Clone)]
 pub struct CallableArgument {
     pub name: SimpleVariable,
-    pub data_type: Option<Type>,
+    pub data_type: Option<PhpArgumentType>,
     pub default_value: Option<PhpValue>,
+    pub is_variadic: bool,
+}
+
+impl PartialEq for CallableArgument {
+    fn eq(&self, other: &Self) -> bool {
+        if self.name.name.bytes != other.name.name.bytes {
+            return false;
+        }
+
+        if self.data_type.is_some() && other.data_type.is_some() {
+            let self_data_type = self.data_type.as_ref().unwrap();
+            let other_data_type = other.data_type.as_ref().unwrap();
+
+            if !(self_data_type == other_data_type) {
+                return false;
+            }
+        } else if self.data_type.is_none() != other.data_type.is_some() {
+            return false;
+        }
+
+        if self.default_value.is_some() && other.default_value.is_some() {
+            let self_default_value = self.default_value.as_ref().unwrap();
+            let other_default_value = other.default_value.as_ref().unwrap();
+
+            if !(self_default_value == other_default_value) {
+                return false;
+            }
+        }
+
+        if self.is_variadic != other.is_variadic {
+            return false;
+        }
+
+        true
+    }
 }
 
 impl PhpValue {
@@ -90,13 +125,11 @@ impl PhpValue {
             (PhpValue::Int(i), PhpValue::Int(j)) => Ok(PhpValue::Int(i.pow(j as u32))),
             (PhpValue::Float(f), PhpValue::Float(g)) => Ok(PhpValue::Float(f.powf(g))),
             (PhpValue::Int(i), PhpValue::Float(f)) => {
-                let f = f;
                 let i = i as f32;
 
                 Ok(PhpValue::Float(i.powf(f)))
             }
             (PhpValue::Float(f), PhpValue::Int(i)) => {
-                let f = f;
                 let i = i as f32;
 
                 Ok(PhpValue::Float(f.powf(i)))
@@ -152,7 +185,7 @@ impl PhpValue {
     }
 
     pub fn is_null(&self) -> bool {
-		matches!(self, PhpValue::Null)
+        matches!(self, PhpValue::Null)
     }
 
     /// Checks if the value is "true" in PHP terms.
@@ -467,8 +500,7 @@ impl Not for PhpValue {
 impl PartialEq for PhpValue {
     fn eq(&self, other: &Self) -> bool {
         self.partial_cmp(other) == Some(Ordering::Equal)
-	}
-
+    }
 }
 
 impl PartialOrd for PhpValue {

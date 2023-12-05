@@ -633,18 +633,18 @@ impl<'a> Evaluator<'a> {
 
                 let right_expr_value = self.eval_expression(&instanceof.right)?;
 
-                // TODO: remove the unwrap
-                let is_instance_of = left_object
-                    .into_class()
-                    .unwrap()
-                    .instance_of(right_expr_value);
+                let PhpValue::Object(right_object) = right_expr_value else {
+					let error = format!(
+							"Right side of instanceof must be an object, got {}",
+							right_expr_value.get_type_as_string()
+						);
 
-                match is_instance_of {
-                    Ok(value) => Ok(PhpValue::Bool(value)),
-                    Err(error) => self.eval_error(error),
-                }
+					return Err(PhpError { level: ErrorLevel::Fatal, message: error, line: instanceof.instanceof.line });
+				};
+
+                Ok(PhpValue::Bool(left_object.instance_of(&right_object)))
             }
-            Expression::Reference(_) => unreachable!(),
+            Expression::Reference(_) => todo!(),
             Expression::Parenthesized(parenthesized) => self.eval_expression(&parenthesized.expr),
             Expression::ErrorSuppress(error_expression) => {
                 let old_php_die = self.die;
@@ -927,18 +927,6 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    fn eval_error(&mut self, error: PhpError) -> Result<PhpValue, PhpError> {
-        match error.level {
-            ErrorLevel::Fatal => Err(error),
-            ErrorLevel::Warning => {
-                self.warnings.push(error);
-
-                Ok(NULL)
-            }
-            ErrorLevel::Raw => Err(error),
-        }
-    }
-
     fn handle_include(
         &mut self,
         path: &Expression,
@@ -987,7 +975,7 @@ impl<'a> Evaluator<'a> {
             return Ok(NULL);
         }
 
-		let ok_abs_path = real_abs_path.unwrap();
+        let ok_abs_path = real_abs_path.unwrap();
 
         let path = ok_abs_path.to_str().unwrap();
 
@@ -1000,10 +988,7 @@ impl<'a> Evaluator<'a> {
         if let Err(error) = content {
             let warning = PhpError {
                 level: ErrorLevel::Warning,
-                message: format!(
-                    "{}({}): Failed to open stream: {}",
-                    fn_name, path, error
-                ),
+                message: format!("{}({}): Failed to open stream: {}", fn_name, path, error),
                 line: span.line,
             };
 

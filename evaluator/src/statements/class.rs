@@ -2,12 +2,14 @@ use std::collections::HashMap;
 
 use php_parser_rs::parser::ast::{
     classes::{ClassMember, ClassStatement},
+    modifiers::MethodModifier,
     properties::PropertyEntry,
 };
 
 use crate::{
     errors::{
-        cannot_redeclare_method, cannot_redeclare_property, cannot_use_default_value_for_parameter,
+        cannot_redeclare_class, cannot_redeclare_method, cannot_redeclare_property,
+        cannot_use_default_value_for_parameter,
     },
     evaluator::Evaluator,
     helpers::{
@@ -21,11 +23,18 @@ use crate::{
             PhpObjectConcreteConstructor, PhpObjectConcreteMethod, PhpObjectConstant,
             PhpObjectProperty,
         },
-        primitive_data_types::{ErrorLevel, PhpError, PhpValue},
+        primitive_data_types::{ErrorLevel, PhpError, PhpValue}, php_argument_type::PhpArgumentType,
     },
 };
 
 pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<PhpValue, PhpError> {
+    if evaluator.env.object_exists(&class.name.value.bytes) {
+        return Err(cannot_redeclare_class(
+            &class.name.value.bytes,
+            class.name.span.line,
+        ));
+    }
+
     let mut parent = None;
     let class_name = get_string_from_bytes(&class.name.value.bytes);
 
@@ -33,7 +42,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     if let Some(extends) = class.extends {
         let parent_name = &extends.parent.value.bytes;
 
-        let parent_class = evaluator.env.get_class(parent_name);
+        let parent_class = evaluator.env.get_object(parent_name);
 
         if parent_class.is_none() {
             return Err(PhpError {
@@ -53,8 +62,8 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     let mut consts = HashMap::new();
     let mut abstract_methods = HashMap::new();
     let mut abstract_constructor: Option<PhpObjectAbstractMethod> = None;
-    let mut concrete_methods = HashMap::new();
-    let mut concrete_constructor: Option<PhpObjectConcreteConstructor> = None;
+    let mut methods = HashMap::new();
+    let mut class_constructor: Option<PhpObjectConcreteConstructor> = None;
 
     // TODO: avoid so many calls to clone()
     for member in class.body.members {
@@ -161,6 +170,22 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                     ));
                 }
 
+                for modifier in &method.modifiers.modifiers {
+                    let MethodModifier::Private(span) = modifier else {
+						continue;
+					};
+
+                    return Err(PhpError {
+                        level: ErrorLevel::Fatal,
+                        message: format!(
+                            "Abstract function {}::{}() cannot be declared private",
+                            class_name,
+                            get_string_from_bytes(&method.name.value.bytes),
+                        ),
+                        line: span.line,
+                    });
+                }
+
                 let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
 
                 let abstract_method = PhpObjectAbstractMethod {
@@ -195,7 +220,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                 })
             }
             ClassMember::ConcreteMethod(method) => {
-                if concrete_methods.contains_key(&method.name.value.bytes) {
+                if methods.contains_key(&method.name.value.bytes) {
                     return Err(cannot_redeclare_method(
                         &class_name,
                         method.name.value,
@@ -205,7 +230,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
 
                 let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
 
-                concrete_methods.insert(
+                methods.insert(
                     method.name.value.bytes.clone(),
                     PhpObjectConcreteMethod {
                         attributes: method.attributes,
@@ -219,7 +244,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                 );
             }
             ClassMember::ConcreteConstructor(constructor) => {
-                if concrete_constructor.is_some() {
+                if class_constructor.is_some() {
                     return Err(cannot_redeclare_method(
                         &class_name,
                         constructor.name.value,
@@ -245,8 +270,11 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                     if let (Some(default), Some(r#type)) = (default_value_expression, data_type) {
                         let mut php_value = evaluator.eval_expression(&default)?;
 
-                        let err =
-                            php_value_matches_type(&r#type, &mut php_value, param.name.span.line);
+                        let err = php_value_matches_type(
+                            &PhpArgumentType::from_type(&r#type, evaluator.env)?,
+                            &mut php_value,
+                            param.name.span.line,
+                        );
 
                         if err.is_some() {
                             return Err(cannot_use_default_value_for_parameter(
@@ -280,13 +308,12 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
                     }
                 }
 
-                concrete_constructor = Some(PhpObjectConcreteConstructor {
+                class_constructor = Some(PhpObjectConcreteConstructor {
                     attributes: constructor.attributes.clone(),
                     modifiers: constructor.modifiers.clone(),
                     return_by_reference: constructor.ampersand.is_some(),
                     name: constructor.name.clone(),
                     parameters: args,
-                    return_type: None,
                     body: constructor.body.clone(),
                 })
             }
@@ -306,8 +333,8 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
             parent: parent.clone(),
             abstract_methods,
             abstract_constructor,
-            concrete_methods,
-            concrete_constructor,
+            methods,
+            constructor: class_constructor,
             traits: vec![],
         })
     } else {
@@ -318,14 +345,14 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
             modifiers: class.modifiers,
             attributes: class.attributes,
             parent: parent.clone(),
-            concrete_methods,
-            concrete_constructor,
+            methods,
+            constructor: class_constructor,
             traits: vec![],
         })
     };
 
     if let Some(parent_object) = parent {
-        let can_extends = new_object.extend(&parent_object);
+        let can_extends = new_object.extend(*parent_object);
 
         if let Some(error) = can_extends {
             return Err(error);
