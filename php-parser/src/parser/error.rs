@@ -1052,6 +1052,14 @@ pub fn only_the_last_parameter_can_be_variadic(span: Span, next: Span) -> ParseE
     )
 }
 
+pub fn expected_trait_name_before(span: Span, method_name: SimpleIdentifier) -> ParseError {
+    ParseError::new("E057".to_string(), "expected trait name before", span).error(
+        format!("try changing this to: `MyTrait::{}`", method_name),
+        span.position,
+        method_name.value.len(),
+    )
+}
+
 impl From<SyntaxError> for ParseError {
     fn from(e: SyntaxError) -> Self {
         Self {

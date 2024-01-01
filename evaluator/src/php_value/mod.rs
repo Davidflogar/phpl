@@ -1,5 +1,6 @@
+pub mod argument_type;
+pub mod error;
 pub mod objects;
-pub mod php_argument_type;
 pub mod primitive_data_types;
 
 mod macros {
@@ -8,53 +9,53 @@ mod macros {
 			$(
 				impl $name {
 					/// Extends the current object with the given object.
-					pub fn extend(&mut self, parent_object: PhpObject) -> Option<PhpError> {
+					pub fn extend(&mut self, parent_object: &PhpObject) -> Result<(), PhpError> {
 						match parent_object {
 							PhpObject::Class(parent) => {
 								if parent.modifiers.has_final() {
-									return Some(PhpError {
-										level: super::primitive_data_types::ErrorLevel::Fatal,
+									return Err(PhpError {
+										level: ErrorLevel::Fatal,
 										message: format!(
 											"Class {} cannot extend final class {}",
-											get_string_from_bytes(&self.name.value.bytes),
-											get_string_from_bytes(&parent.name.value.bytes)
+											get_string_from_bytes(&self.name.value),
+											get_string_from_bytes(&parent.name.value)
 										),
 										line: self.name.span.line,
 									});
 								}
 
 								// get the properties and constants of the parent and add them to the current object
-								extend_hashmap_without_overwrite(&mut self.properties, parent.properties);
-								extend_hashmap_without_overwrite(&mut self.consts, parent.consts);
-								extend_hashmap_without_overwrite(&mut self.methods, parent.methods);
+								extend_hashmap_without_overwrite(&mut self.properties, parent.properties.clone());
+								extend_hashmap_without_overwrite(&mut self.consts, parent.consts.clone());
+								extend_hashmap_without_overwrite(&mut self.methods, parent.methods.clone());
 
-								None
+								Ok(())
 							}
 							PhpObject::AbstractClass(parent) => {
 								if parent.modifiers.has_final() {
-									return Some(PhpError {
-										level: super::primitive_data_types::ErrorLevel::Fatal,
+									return Err(PhpError {
+										level: ErrorLevel::Fatal,
 										message: format!(
 											"Class {} cannot extend final class {}",
-											get_string_from_bytes(&self.name.value.bytes),
-											get_string_from_bytes(&parent.name.value.bytes)
+											get_string_from_bytes(&self.name.value),
+											get_string_from_bytes(&parent.name.value)
 										),
 										line: self.name.span.line,
 									});
 								}
 
 								// get the properties and constants of the parent and add them to the current object
-								extend_hashmap_without_overwrite(&mut self.properties, parent.properties);
-								extend_hashmap_without_overwrite(&mut self.consts, parent.consts);
-								extend_hashmap_without_overwrite(&mut self.methods, parent.methods);
+								extend_hashmap_without_overwrite(&mut self.properties, parent.properties.clone());
+								extend_hashmap_without_overwrite(&mut self.consts, parent.consts.clone());
+								extend_hashmap_without_overwrite(&mut self.methods, parent.methods.clone());
 
 								if !self.modifiers.has_abstract() {
 									// validate the abstract methods/constructor
 									let mut remaining_abstract_methods: Vec<String> = vec![];
 
-									for (name, method) in parent.abstract_methods {
+									for (name, method) in &parent.abstract_methods {
 
-										let current_method_option = self.methods.get(&name);
+										let current_method_option = self.methods.get(name);
 
 										let Some(current_method) = current_method_option else {
 											remaining_abstract_methods.push(get_string_from_bytes(&name));
@@ -79,25 +80,25 @@ mod macros {
 													"{}{}{}",
 													data_type_as_string,
 													if parameter.is_variadic {"..."} else {""},
-													get_string_from_bytes(&parameter.name.name.bytes),
+													get_string_from_bytes(&parameter.name.name),
 												)
 											};
 
-											return Some(PhpError {
+											return Err(PhpError {
 												level: ErrorLevel::Fatal,
 												message: format!(
 													"Declaration of {}::{}() must be compatible with {}{}::{}({}){}",
-													get_string_from_bytes(&self.name.value.bytes),
+													get_string_from_bytes(&self.name.value),
 													get_string_from_bytes(&name),
 													if method.return_by_reference {"&"} else {""},
-													get_string_from_bytes(&parent.name.value.bytes),
+													get_string_from_bytes(&parent.name.value),
 													get_string_from_bytes(&name),
 													method.parameters
 														.iter()
 														.map(|parameter| format_parameter(parameter))
 														.collect::<Vec<String>>()
 														.join(", "),
-													if let Some(r#type) = method.return_type {
+													if let Some(r#type) = &method.return_type {
 														format!(": {}", r#type.data_type)
 													} else {
 														String::new()
@@ -109,7 +110,7 @@ mod macros {
 									}
 
 									if !remaining_abstract_methods.is_empty() {
-										return Some(PhpError {
+										return Err(PhpError {
 											level: ErrorLevel::Fatal,
 											message: format!(
 												"Class {} contains {} abstract method and must therefore be declared abstract \
@@ -120,7 +121,7 @@ mod macros {
 													.iter()
 													.map(|element| format!(
 														"{}::{}",
-														get_string_from_bytes(&parent.name.value.bytes), element)
+														get_string_from_bytes(&parent.name.value), element)
 													)
 													.collect::<Vec<String>>()
 													.join(", "),
@@ -130,8 +131,13 @@ mod macros {
 									}
 								}
 
-								None
+								Ok(())
 							}
+							PhpObject::Trait(trait_) => Err(PhpError {
+								level: ErrorLevel::Fatal,
+								message: format!("Class {} cannot extend trait {}", self.name, trait_.name),
+								line: trait_.name.span.line,
+							})
 						}
 					}
 

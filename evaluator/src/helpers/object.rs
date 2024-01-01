@@ -2,7 +2,7 @@ use php_parser_rs::parser::ast::data_type::Type;
 
 use crate::{
     errors,
-    php_value::primitive_data_types::{PhpError, PhpValue},
+    php_value::{error::PhpError, primitive_data_types::PhpValue},
 };
 
 // Checks that a property has a valid default value.
@@ -12,13 +12,12 @@ pub fn property_has_valid_default_value(
     line: usize,
     class_name: &str,
     property_name: &str,
-) -> Option<PhpError> {
-
+) -> Result<(), PhpError> {
     match r#type.unwrap() {
         Type::Named(_, _) => todo!(),
         Type::Nullable(_, r#type) => {
             if let PhpValue::Null = default {
-                return None;
+                return Ok(());
             }
 
             property_has_valid_default_value(Some(r#type), default, line, class_name, property_name)
@@ -26,11 +25,11 @@ pub fn property_has_valid_default_value(
         Type::Union(types) => {
             let matches_any = types.iter().any(|ty| {
                 property_has_valid_default_value(Some(ty), default, line, class_name, property_name)
-                    .is_none()
+                    .is_ok()
             });
 
             if !matches_any {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -45,7 +44,7 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Intersection(types) => {
             for ty in types {
@@ -55,8 +54,10 @@ pub fn property_has_valid_default_value(
                     line,
                     class_name,
                     property_name,
-                ).is_some() {
-                    return Some(
+                )
+                .is_err()
+                {
+                    return Err(
                         errors::cannot_use_type_as_default_value_for_property_of_type(
                             default.get_type_as_string(),
                             class_name,
@@ -72,12 +73,12 @@ pub fn property_has_valid_default_value(
                 }
             }
 
-            None
+            Ok(())
         }
         Type::Void(_) => unreachable!(),
         Type::Null(_) => {
             if !matches!(default, PhpValue::Null) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -88,11 +89,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::True(_) => {
             let PhpValue::Bool(b) = *default else {
-                return Some(errors::cannot_use_type_as_default_value_for_property_of_type(
+                return Err(errors::cannot_use_type_as_default_value_for_property_of_type(
                     default.get_type_as_string(),
 					class_name,
 					property_name,
@@ -102,7 +103,7 @@ pub fn property_has_valid_default_value(
             };
 
             if !b {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -113,11 +114,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::False(_) => {
             let PhpValue::Bool(b) = *default else {
-                return Some(errors::cannot_use_type_as_default_value_for_property_of_type(
+                return Err(errors::cannot_use_type_as_default_value_for_property_of_type(
                     default.get_type_as_string(),
 					class_name,
 					property_name,
@@ -127,7 +128,7 @@ pub fn property_has_valid_default_value(
             };
 
             if b {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -138,12 +139,12 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Never(_) => unreachable!(),
         Type::Float(_) => {
             if !matches!(default, PhpValue::Float(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -154,11 +155,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Boolean(_) => {
             if !matches!(default, PhpValue::Bool(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -169,11 +170,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Integer(_) => {
             if !matches!(default, PhpValue::Int(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -184,11 +185,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::String(_) => {
             if !matches!(default, PhpValue::String(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -199,11 +200,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Array(_) => {
             if !matches!(default, PhpValue::Array(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -214,11 +215,11 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Object(_) => {
             if !matches!(default, PhpValue::Object(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -229,12 +230,12 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
-        Type::Mixed(_) => None,
+        Type::Mixed(_) => Ok(()),
         Type::Callable(_) => {
             if !matches!(default, PhpValue::Callable(_)) {
-                return Some(
+                return Err(
                     errors::cannot_use_type_as_default_value_for_property_of_type(
                         default.get_type_as_string(),
                         class_name,
@@ -245,7 +246,7 @@ pub fn property_has_valid_default_value(
                 );
             }
 
-            None
+            Ok(())
         }
         Type::Iterable(_) => todo!(),
         Type::StaticReference(_) => unreachable!(),

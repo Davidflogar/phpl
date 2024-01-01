@@ -1,11 +1,15 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use php_parser_rs::parser::ast::{arguments::Argument, FunctionCallExpression};
 
 use crate::{
     evaluator::Evaluator,
     helpers::get_string_from_bytes,
-    php_value::primitive_data_types::{CallableArgument, ErrorLevel, PhpError, PhpValue},
+    php_value::{
+        error::{ErrorLevel, PhpError},
+        primitive_data_types::{CallableArgument, PhpValue},
+    },
+    scope::Scope,
 };
 
 pub fn expression(
@@ -34,7 +38,7 @@ pub fn expression(
 
     let target_name_as_vec = target_name.as_bytes().to_vec();
 
-    let function_option = evaluator.env.get_ident(&target_name_as_vec);
+    let function_option = evaluator.scope().get_ident(&target_name_as_vec);
 
     if function_option.is_none() {
         let error = format!("Function {} not found", target_name);
@@ -118,12 +122,12 @@ pub fn expression(
             // validate the argument
             let is_not_valid = self_arg.is_valid(&mut positional_arg, called_in_line);
 
-            if let Some(mut error) = is_not_valid {
+            if let Err(mut error) = is_not_valid {
                 error.message = format!(
                     "{}(): Argument #{} ({}): {}",
                     target_name,
                     i + 1,
-                    get_string_from_bytes(&self_arg.name.name.bytes),
+                    get_string_from_bytes(&self_arg.name.name),
                     error.message
                 );
 
@@ -136,16 +140,16 @@ pub fn expression(
         }
 
         // iterate over the named arguments and check if they are valid
-        for (mut key, mut value) in named_arguments {
+        for (mut name, mut value) in named_arguments {
             // add the $ at the beginning since the argument name is saved with $
-            key.insert(0, b'$');
+            name.insert(0, b'$');
 
-            if final_function_parameters.contains_key(&key) {
+            if final_function_parameters.contains_key(&name) {
                 return Err(PhpError {
                     level: ErrorLevel::Fatal,
                     message: format!(
                         "Named argument {} overwrites previous argument, called in",
-                        get_string_from_bytes(&key)
+                        get_string_from_bytes(&name)
                     ),
                     line: called_in_line,
                 });
@@ -154,17 +158,17 @@ pub fn expression(
             let mut self_arg: Option<&CallableArgument> = None;
 
             if !function.parameters.iter().any(|c| {
-                if c.name.name.bytes == key {
+                if c.name.name.bytes == name {
                     self_arg = Some(c);
 
                     return true;
                 }
 
-                c.name.name.bytes == key
+                c.name.name.bytes == name
             }) {
                 return Err(PhpError {
                     level: ErrorLevel::Fatal,
-                    message: format!("Unknown named argument {}", get_string_from_bytes(&key)),
+                    message: format!("Unknown named argument {}", get_string_from_bytes(&name)),
                     line: called_in_line,
                 });
             }
@@ -174,21 +178,21 @@ pub fn expression(
 
             let is_not_valid = self_arg.is_valid(&mut value, called_in_line);
 
-            if let Some(mut error) = is_not_valid {
+            if let Err(mut error) = is_not_valid {
                 error.message = format!(
                     "{}(): Argument #{} ({}): {}",
                     target_name,
                     final_function_parameters.len(),
-                    get_string_from_bytes(&self_arg.name.name.bytes),
+                    get_string_from_bytes(&self_arg.name.name),
                     error.message
                 );
 
                 return Err(error);
             }
 
-            required_arguments.retain(|c| c.name.name.bytes != key);
+            required_arguments.retain(|c| c.name.name.bytes != name);
 
-            final_function_parameters.insert(key, value);
+            final_function_parameters.insert(name, value);
         }
 
         for required_arg in required_arguments.iter() {
@@ -212,22 +216,25 @@ pub fn expression(
         }
     }
 
-    // start the trace of the environment
-    evaluator.env.start_trace();
+    let old_environment = Rc::clone(&evaluator.env);
+
+    let new_env = Scope::new();
+
+    evaluator.change_environment(Rc::new(RefCell::new(new_env)));
 
     for new_var in final_function_parameters {
-        evaluator.env.insert_var(&new_var.0, &new_var.1);
+        evaluator.scope().insert_var(&new_var.0, &new_var.1);
     }
 
     // execute the function
-    let mut result: Result<PhpValue, PhpError> = Ok(PhpValue::Null);
+    let mut result = Ok(PhpValue::Null);
 
     for statement in function.body {
         result = evaluator.eval_statement(statement);
     }
 
-    // restore the environment
-    evaluator.env.restore();
+    // change to the old environment
+    evaluator.change_environment(old_environment);
 
     if let Err(mut err) = result {
         err.line = called_in_line;

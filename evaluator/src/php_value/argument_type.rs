@@ -2,11 +2,11 @@ use std::fmt::Display;
 
 use php_parser_rs::parser::ast::data_type::Type;
 
-use crate::{environment::Environment, helpers::get_string_from_bytes};
+use crate::{helpers::get_string_from_bytes, scope::Scope};
 
 use super::{
+    error::{ErrorLevel, PhpError},
     objects::PhpObject,
-    primitive_data_types::{ErrorLevel, PhpError},
 };
 
 /// An enum that represents all data types that are valid to use as parameter in php.
@@ -37,15 +37,15 @@ pub enum PhpArgumentType {
 impl PhpArgumentType {
     /// Converts a `Type` to a `PhpArgumentType`.
     ///
-    /// The `env` is only used with named types, as they can be a class or a trait.
-    pub fn from_type(value: &Type, env: &Environment) -> Result<Self, PhpError> {
+    /// The `scope` is only used with named types, as they can be a class or a trait.
+    pub fn from_type(value: &Type, scope: &Scope) -> Result<Self, PhpError> {
         match value {
             Type::Named(span, name) => {
-                let Some(object) = env.get_object(name) else {
+                let Some(object) = scope.get_object(name) else {
 					return Err(PhpError {
 						level: ErrorLevel::Fatal,
 						message: format!("Undefined type {}",
-						get_string_from_bytes(&name.bytes)),
+						get_string_from_bytes(name)),
 						line: span.line
 					})
 				};
@@ -53,13 +53,13 @@ impl PhpArgumentType {
                 Ok(PhpArgumentType::Named(object))
             }
             Type::Nullable(_, r#type) => Ok(PhpArgumentType::Nullable(Box::new(
-                PhpArgumentType::from_type(r#type, env)?,
+                PhpArgumentType::from_type(r#type, scope)?,
             ))),
             Type::Union(union) => {
                 let mut vec_types = vec![];
 
                 for r#type in union {
-                    vec_types.push(PhpArgumentType::from_type(r#type, env)?);
+                    vec_types.push(PhpArgumentType::from_type(r#type, scope)?);
                 }
 
                 Ok(PhpArgumentType::Union(vec_types))
@@ -68,7 +68,7 @@ impl PhpArgumentType {
                 let mut vec_types = vec![];
 
                 for r#type in intersection {
-                    vec_types.push(PhpArgumentType::from_type(r#type, env)?);
+                    vec_types.push(PhpArgumentType::from_type(r#type, scope)?);
                 }
 
                 Ok(PhpArgumentType::Intersection(vec_types))
@@ -119,7 +119,7 @@ impl Display for PhpArgumentType {
             ),
             PhpArgumentType::Null => write!(f, "null"),
             PhpArgumentType::True => write!(f, "true"),
-			PhpArgumentType::False => write!(f, "false"),
+            PhpArgumentType::False => write!(f, "false"),
             PhpArgumentType::Float => write!(f, "float"),
             PhpArgumentType::Bool => write!(f, "bool"),
             PhpArgumentType::Int => write!(f, "int"),
@@ -157,7 +157,7 @@ impl PartialEq for PhpArgumentType {
             (PhpArgumentType::ParentReference, PhpArgumentType::ParentReference) => true,
             (PhpArgumentType::True, PhpArgumentType::True) => true,
             (PhpArgumentType::False, PhpArgumentType::False) => true,
-            (PhpArgumentType::Named(a), PhpArgumentType::Named(b)) => return a.instance_of(b),
+            (PhpArgumentType::Named(a), PhpArgumentType::Named(b)) => a.instance_of(b),
             _ => false,
         }
     }

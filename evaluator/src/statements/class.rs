@@ -1,48 +1,41 @@
 use std::collections::HashMap;
 
-use php_parser_rs::parser::ast::{
-    classes::{ClassMember, ClassStatement},
-    modifiers::MethodModifier,
-    properties::PropertyEntry,
-};
+use php_parser_rs::parser::ast::classes::{ClassMember, ClassStatement};
 
 use crate::{
-    errors::{
-        cannot_redeclare_class, cannot_redeclare_method, cannot_redeclare_property,
-        cannot_use_default_value_for_parameter,
-    },
+    errors::cannot_redeclare_object,
     evaluator::Evaluator,
-    helpers::{
-        callable::{parse_function_parameter_list, php_value_matches_type},
-        get_string_from_bytes,
-        object::property_has_valid_default_value,
-    },
+    helpers::get_string_from_bytes,
     php_value::{
+        error::{ErrorLevel, PhpError},
         objects::{
-            ConstructorParameter, PhpAbstractClass, PhpClass, PhpObject, PhpObjectAbstractMethod,
-            PhpObjectConcreteConstructor, PhpObjectConcreteMethod, PhpObjectConstant,
-            PhpObjectProperty,
+            PhpAbstractClass, PhpClass, PhpObject, PhpObjectAbstractMethod,
+            PhpObjectConcreteConstructor, PhpObjectType, PhpTrait,
         },
-        primitive_data_types::{ErrorLevel, PhpError, PhpValue}, php_argument_type::PhpArgumentType,
+        primitive_data_types::PhpValue,
     },
 };
 
+use super::objects;
+
 pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<PhpValue, PhpError> {
-    if evaluator.env.object_exists(&class.name.value.bytes) {
-        return Err(cannot_redeclare_class(
-            &class.name.value.bytes,
+    if evaluator.scope().object_exists(&class.name.value) {
+        return Err(cannot_redeclare_object(
+            &class.name.value,
             class.name.span.line,
+            PhpObjectType::Class,
         ));
     }
 
     let mut parent = None;
-    let class_name = get_string_from_bytes(&class.name.value.bytes);
+
+    let class_name = get_string_from_bytes(&class.name.value);
 
     // get the parent if any
     if let Some(extends) = class.extends {
-        let parent_name = &extends.parent.value.bytes;
+        let parent_name = &extends.parent.value;
 
-        let parent_class = evaluator.env.get_object(parent_name);
+        let parent_class = evaluator.scope().get_object(parent_name);
 
         if parent_class.is_none() {
             return Err(PhpError {
@@ -58,6 +51,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     }
 
     // get the properties, methods, and rest of the class body
+
     let mut properties = HashMap::new();
     let mut consts = HashMap::new();
     let mut abstract_methods = HashMap::new();
@@ -65,307 +59,112 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     let mut methods = HashMap::new();
     let mut class_constructor: Option<PhpObjectConcreteConstructor> = None;
 
-    // TODO: avoid so many calls to clone()
+    let mut used_traits = HashMap::new();
+
+    let mut duplicated_methods = vec![];
+
     for member in class.body.members {
         match member {
             ClassMember::Constant(constant) => {
-                for entry in constant.entries {
-                    if consts.contains_key(&entry.name.value.bytes) {
-                        return Err(PhpError {
-                            level: ErrorLevel::Fatal,
-                            message: format!(
-                                "Cannot redefine class constant {}::{}",
-                                class_name,
-                                get_string_from_bytes(&entry.name.value.bytes)
-                            ),
-                            line: entry.name.span.line,
-                        });
-                    }
-
-                    let attributes = constant.attributes.clone();
-                    let modifiers = constant.modifiers.clone();
-
-                    consts.insert(
-                        entry.name.value.bytes,
-                        PhpObjectConstant {
-                            attributes,
-                            modifiers,
-                            value: evaluator.eval_expression(&entry.value)?,
-                        },
-                    );
-                }
+                objects::object_body::constant(evaluator, constant, &class_name, &mut consts)?
+            }
+            ClassMember::TraitUsage(trait_statement) => {
+                duplicated_methods.extend(objects::object_body::trait_usage(
+                    evaluator,
+                    trait_statement,
+                    &class_name,
+                    &mut used_traits,
+                )?);
             }
             ClassMember::Property(property) => {
-                for entry in property.entries {
-                    let attributes = property.attributes.clone();
-                    let modifiers = property.modifiers.clone();
-                    let r#type = property.r#type.clone();
-
-                    match entry {
-                        PropertyEntry::Initialized {
-                            variable,
-                            equals,
-                            value,
-                        } => {
-                            if properties.contains_key(&variable.name.bytes) {
-                                return Err(cannot_redeclare_property(
-                                    &class_name,
-                                    variable.name,
-                                    variable.span.line,
-                                ));
-                            }
-
-                            let expr_value = evaluator.eval_expression(&value)?;
-
-                            let not_valid = property_has_valid_default_value(
-                                r#type.as_ref(),
-                                &expr_value,
-                                equals.line,
-                                get_string_from_bytes(&class.name.value.bytes).as_str(),
-                                get_string_from_bytes(&variable.name.bytes).as_str(),
-                            );
-
-                            if let Some(error) = not_valid {
-                                return Err(error);
-                            }
-
-                            let property = PhpObjectProperty {
-                                attributes,
-                                modifiers,
-                                r#type,
-                                value: expr_value,
-                                initialized: true,
-                            };
-
-                            properties.insert(variable.name.bytes, property);
-                        }
-                        PropertyEntry::Uninitialized { variable } => {
-                            if properties.contains_key(&variable.name.bytes) {
-                                return Err(cannot_redeclare_property(
-                                    &class_name,
-                                    variable.name,
-                                    variable.span.line,
-                                ));
-                            }
-
-                            let property = PhpObjectProperty {
-                                attributes,
-                                modifiers,
-                                r#type,
-                                value: PhpValue::Null,
-                                initialized: false,
-                            };
-
-                            properties.insert(variable.name.bytes, property);
-                        }
-                    }
-                }
+                objects::object_body::property(evaluator, property, &class_name, &mut properties)?
             }
-            ClassMember::AbstractMethod(method) => {
-                if abstract_methods.contains_key(&method.name.value.bytes) {
-                    return Err(cannot_redeclare_method(
-                        &class_name,
-                        method.name.value,
-                        method.name.span.line,
-                    ));
-                }
-
-                for modifier in &method.modifiers.modifiers {
-                    let MethodModifier::Private(span) = modifier else {
-						continue;
-					};
-
-                    return Err(PhpError {
-                        level: ErrorLevel::Fatal,
-                        message: format!(
-                            "Abstract function {}::{}() cannot be declared private",
-                            class_name,
-                            get_string_from_bytes(&method.name.value.bytes),
-                        ),
-                        line: span.line,
-                    });
-                }
-
-                let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
-
-                let abstract_method = PhpObjectAbstractMethod {
-                    attributes: method.attributes,
-                    modifiers: method.modifiers,
-                    return_by_reference: method.ampersand.is_some(),
-                    name: method.name.clone(),
-                    parameters: method_args,
-                    return_type: method.return_type,
-                };
-
-                abstract_methods.insert(method.name.value.bytes, abstract_method);
-            }
+            ClassMember::AbstractMethod(method) => objects::object_body::abstract_method(
+                evaluator,
+                method,
+                &class_name,
+                &mut abstract_methods,
+                &methods,
+            )?,
             ClassMember::AbstractConstructor(constructor) => {
-                if abstract_constructor.is_some() {
-                    return Err(cannot_redeclare_method(
-                        &class_name,
-                        constructor.name.value,
-                        constructor.name.span.line,
-                    ));
-                }
-
-                let method_args = parse_function_parameter_list(constructor.parameters, evaluator)?;
-
-                abstract_constructor = Some(PhpObjectAbstractMethod {
-                    attributes: constructor.attributes,
-                    modifiers: constructor.modifiers,
-                    return_by_reference: constructor.ampersand.is_some(),
-                    name: constructor.name,
-                    parameters: method_args,
-                    return_type: None,
-                })
+                abstract_constructor = Some(objects::object_body::abstract_constructor(
+                    evaluator,
+                    constructor,
+                    &class_name,
+                    abstract_constructor,
+                )?)
             }
-            ClassMember::ConcreteMethod(method) => {
-                if methods.contains_key(&method.name.value.bytes) {
-                    return Err(cannot_redeclare_method(
-                        &class_name,
-                        method.name.value,
-                        method.name.span.line,
-                    ));
-                }
-
-                let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
-
-                methods.insert(
-                    method.name.value.bytes.clone(),
-                    PhpObjectConcreteMethod {
-                        attributes: method.attributes,
-                        modifiers: method.modifiers,
-                        return_by_reference: method.ampersand.is_some(),
-                        name: method.name,
-                        parameters: method_args,
-                        return_type: method.return_type,
-                        body: method.body,
-                    },
-                );
-            }
+            ClassMember::ConcreteMethod(method) => objects::object_body::concrete_method(
+                evaluator,
+                method,
+                &class_name,
+                &mut methods,
+                &abstract_methods,
+            )?,
             ClassMember::ConcreteConstructor(constructor) => {
-                if class_constructor.is_some() {
-                    return Err(cannot_redeclare_method(
-                        &class_name,
-                        constructor.name.value,
-                        constructor.name.span.line,
-                    ));
-                }
-
-                let mut args = vec![];
-
-                for param in constructor.parameters.parameters {
-                    if properties.contains_key(&param.name.name.bytes) {
-                        return Err(cannot_redeclare_property(
-                            &class_name,
-                            param.name.name,
-                            param.name.span.line,
-                        ));
-                    }
-
-                    let default_value_expression = param.default;
-                    let data_type = param.data_type.clone();
-                    let default_value = None;
-
-                    if let (Some(default), Some(r#type)) = (default_value_expression, data_type) {
-                        let mut php_value = evaluator.eval_expression(&default)?;
-
-                        let err = php_value_matches_type(
-                            &PhpArgumentType::from_type(&r#type, evaluator.env)?,
-                            &mut php_value,
-                            param.name.span.line,
-                        );
-
-                        if err.is_some() {
-                            return Err(cannot_use_default_value_for_parameter(
-                                php_value.get_type_as_string(),
-                                get_string_from_bytes(&param.name.name.bytes),
-                                r#type.to_string(),
-                                param.name.span.line,
-                            ));
-                        }
-                    }
-
-                    if !param.modifiers.is_empty() {
-                        // it is a promoted property
-                        args.push(ConstructorParameter::PromotedProperty {
-                            attributes: param.attributes,
-                            pass_by_reference: param.ampersand.is_some(),
-                            name: param.name.name.bytes,
-                            data_type: param.data_type,
-                            default: default_value,
-                            modifiers: param.modifiers,
-                        });
-                    } else {
-                        args.push(ConstructorParameter::Normal {
-                            attributes: param.attributes,
-                            pass_by_reference: param.ampersand.is_some(),
-                            name: param.name.name.bytes,
-                            data_type: param.data_type,
-                            default: default_value,
-                            ellipsis: param.ellipsis.is_some(),
-                        });
-                    }
-                }
-
-                class_constructor = Some(PhpObjectConcreteConstructor {
-                    attributes: constructor.attributes.clone(),
-                    modifiers: constructor.modifiers.clone(),
-                    return_by_reference: constructor.ampersand.is_some(),
-                    name: constructor.name.clone(),
-                    parameters: args,
-                    body: constructor.body.clone(),
-                })
+                class_constructor = Some(objects::object_body::concrete_constructor(
+                    evaluator,
+                    constructor,
+                    &class_name,
+                    class_constructor,
+                    &mut properties,
+                )?)
             }
             _ => todo!(),
         }
     }
 
-    let has_abstract = class.modifiers.has_abstract();
-
-    let mut new_object = if has_abstract {
-        PhpObject::AbstractClass(PhpAbstractClass {
-            name: class.name.clone(),
-            properties,
-            consts,
-            modifiers: class.modifiers,
-            attributes: class.attributes,
-            parent: parent.clone(),
-            abstract_methods,
-            abstract_constructor,
-            methods,
-            constructor: class_constructor,
-            traits: vec![],
-        })
-    } else {
-        PhpObject::Class(PhpClass {
-            name: class.name.clone(),
-            properties,
-            consts,
-            modifiers: class.modifiers,
-            attributes: class.attributes,
-            parent: parent.clone(),
-            methods,
-            constructor: class_constructor,
-            traits: vec![],
-        })
-    };
-
-    if let Some(parent_object) = parent {
-        let can_extends = new_object.extend(*parent_object);
-
-        if let Some(error) = can_extends {
+    for (method, error) in duplicated_methods {
+        if !methods.contains_key(&method) && !abstract_methods.contains_key(&method) {
             return Err(error);
         }
     }
 
-    let class_error = evaluator
-        .env
-        .new_class(&class.name.value.bytes, new_object, class.name.span);
+    let traits: Vec<PhpTrait> = used_traits.into_values().collect();
 
-    if let Some(error) = class_error {
-        return Err(error);
+    // create the new object
+
+    let has_abstract = class.modifiers.has_abstract();
+
+    let mut new_object = if has_abstract {
+        PhpObject::AbstractClass(PhpAbstractClass {
+            name: class.name,
+            modifiers: class.modifiers,
+            attributes: class.attributes,
+            parent: None,
+            properties,
+            consts,
+            traits,
+            abstract_methods,
+            abstract_constructor,
+            methods,
+            constructor: class_constructor,
+        })
+    } else {
+        PhpObject::Class(PhpClass {
+            name: class.name,
+            modifiers: class.modifiers,
+            attributes: class.attributes,
+            parent: None,
+            properties,
+            consts,
+            traits,
+            methods,
+            constructor: class_constructor,
+        })
+    };
+
+    if let Some(parent_object) = parent {
+        new_object.extend(&parent_object)?;
+
+        new_object.set_parent(parent_object);
     }
+
+    println!("{:#?}", new_object);
+
+    evaluator
+        .scope()
+        .new_object(new_object, PhpObjectType::Class)?;
 
     Ok(PhpValue::Null)
 }

@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::{fs, str};
 
@@ -16,21 +17,18 @@ use php_parser_rs::{
     },
 };
 
-use crate::expressions::function_call;
+use crate::expressions::{function_call, new};
 use crate::helpers::callable::parse_function_parameter_list;
 use crate::helpers::{get_string_from_bytes, parse_php_file};
+use crate::php_value::error::{ErrorLevel, PhpError};
 use crate::php_value::primitive_data_types::PhpCallable;
-use crate::statements::class;
+use crate::statements::{class, traits};
 use crate::warnings;
-use crate::{
-    environment::Environment,
-    helpers::get_span_from_var,
-    php_value::primitive_data_types::{ErrorLevel, PhpError, PhpValue},
-};
+use crate::{helpers::get_span_from_var, php_value::primitive_data_types::PhpValue, scope::Scope};
 
 const NULL: PhpValue = PhpValue::Null;
 
-pub struct Evaluator<'a> {
+pub struct Evaluator {
     /// The output of the evaluated code
     pub output: String,
 
@@ -40,16 +38,16 @@ pub struct Evaluator<'a> {
     /// Whether the PHP code must die
     pub die: bool,
 
-    pub env: &'a mut Environment,
+    pub env: Rc<RefCell<Scope>>,
 
     pub warnings: Vec<PhpError>,
 
-    pub included_files: Vec<String>, // TODO: change the data type to a fixed and immutable string
-    pub required_files: Vec<String>, // TODO: change the data type to a fixed and immutable string
+    pub included_files: Vec<String>,
+    pub required_files: Vec<String>,
 }
 
-impl<'a> Evaluator<'a> {
-    pub fn new(env: &'a mut Environment) -> Evaluator<'a> {
+impl Evaluator {
+    pub fn new(env: Rc<RefCell<Scope>>) -> Evaluator {
         Evaluator {
             output: String::new(),
             php_open: false,
@@ -61,9 +59,17 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    pub fn change_environment(&mut self, env: Rc<RefCell<Scope>>) {
+        self.env = env;
+    }
+
     /// Appends the given output to the current evaluator's output.
     pub fn add_output(&mut self, output: &str) {
         self.output.push_str(output)
+    }
+
+    pub fn scope(&mut self) -> std::cell::RefMut<'_, Scope> {
+        self.env.borrow_mut()
     }
 
     pub fn eval_statement(&mut self, node: Statement) -> Result<PhpValue, PhpError> {
@@ -79,7 +85,7 @@ impl<'a> Evaluator<'a> {
                 Ok(NULL)
             }
             Statement::InlineHtml(html) => {
-                self.add_output(&get_string_from_bytes(&html.html.bytes));
+                self.add_output(&get_string_from_bytes(&html.html));
 
                 Ok(NULL)
             }
@@ -122,19 +128,16 @@ impl<'a> Evaluator<'a> {
                     is_method: false,
                 };
 
-                let set_identifier = self.env.new_ident(
-                    &func.name.value.bytes,
+                self.scope().new_ident(
+                    &func.name.value,
                     PhpValue::Callable(php_callable),
                     func.function,
-                );
-
-                if let Some(err) = set_identifier {
-                    return Err(err);
-                }
+                )?;
 
                 Ok(NULL)
             }
             Statement::Class(statement) => class::statement(self, statement),
+            Statement::Trait(statement) => traits::statement(self, statement),
             _ => {
                 println!("TODO: statement {:#?}\n", node);
                 Ok(NULL)
@@ -154,7 +157,7 @@ impl<'a> Evaluator<'a> {
                     PhpValue::Null => PhpValue::Bool(true),
                     PhpValue::Bool(b) => PhpValue::Bool(!b),
                     PhpValue::String(s) => {
-                        let string = get_string_from_bytes(&s.bytes);
+                        let string = get_string_from_bytes(&s);
 
                         PhpValue::Bool(string.is_empty() || string == "0")
                     }
@@ -182,7 +185,7 @@ impl<'a> Evaluator<'a> {
                 for var in variables {
                     let var_name = self.get_variable_name(var)?;
 
-                    let var_exists = self.env.get_var(&var_name);
+                    let var_exists = self.scope().get_var(&var_name);
 
                     if var_exists.is_none() {
                         return Ok(PhpValue::Bool(false));
@@ -197,7 +200,7 @@ impl<'a> Evaluator<'a> {
                 for arg in args {
                     let var_name = self.get_variable_name(arg)?;
 
-                    self.env.delete_var(&var_name);
+                    self.scope().delete_var(&var_name);
                 }
 
                 Ok(NULL)
@@ -349,30 +352,34 @@ impl<'a> Evaluator<'a> {
 
                         let right_var_name = self.get_variable_name(right_var)?;
 
-                        if !self.env.var_exists(&right_var_name) {
-                            self.env.insert_var(&right_var_name, &NULL)
+                        if !self.scope().var_exists(&right_var_name) {
+                            self.scope().insert_var(&right_var_name, &NULL)
                         }
 
                         let right_value = self
                             .env
+                            .borrow_mut()
                             .get_var_with_rc(&right_var_name)
                             .unwrap()
                             .to_owned();
 
                         let cloned_right_value = Rc::clone(&right_value);
 
-                        self.env.insert_var_rc(&left_var_name, cloned_right_value);
+                        self.scope()
+                            .insert_var_rc(&left_var_name, cloned_right_value);
 
                         return Ok(right_value.borrow().clone());
                     } else {
                         let right_value = self.eval_expression(right)?;
 
-                        if !self.env.var_exists(&left_var_name) {
-                            self.env.insert_var(&left_var_name, &right_value);
+                        if !self.scope().var_exists(&left_var_name) {
+                            self.scope().insert_var(&left_var_name, &right_value);
                         } else {
-                            let old_value = self.env.get_var_with_rc(&left_var_name).unwrap();
+                            let env_borrow = self.scope();
 
-                            *old_value.borrow_mut() = right_value.clone()
+                            let old_value = env_borrow.get_var_with_rc(&left_var_name).unwrap();
+
+                            *old_value.borrow_mut() = right_value.clone();
                         }
 
                         Ok(right_value)
@@ -663,7 +670,7 @@ impl<'a> Evaluator<'a> {
                 Identifier::SimpleIdentifier(simple_identifier) => {
                     let identifier_name = &simple_identifier.value;
 
-                    let expr = self.env.get_ident(identifier_name);
+                    let expr = self.scope().get_ident(identifier_name);
 
                     if let Some(expr) = expr {
                         Ok(expr.clone())
@@ -694,6 +701,7 @@ impl<'a> Evaluator<'a> {
             }
             Expression::FunctionCall(call) => function_call::expression(self, call),
             Expression::FunctionClosureCreation(_) => todo!(),
+            Expression::New(new) => new::expression(self, new),
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
         }
@@ -776,9 +784,9 @@ impl<'a> Evaluator<'a> {
     fn get_variable_value(&mut self, variable: &Variable) -> Result<PhpValue, PhpError> {
         match variable {
             Variable::SimpleVariable(sv) => {
-                let var_name = &sv.name.bytes;
+                let var_name = &sv.name;
 
-                let value = self.env.get_var(var_name);
+                let value = self.scope().get_var(var_name);
 
                 if let Some(value) = value {
                     Ok(value)
@@ -825,7 +833,7 @@ impl<'a> Evaluator<'a> {
 
                 let variable_name = expr_as_string.unwrap();
 
-                if !self.env.var_exists(variable_name.as_bytes()) {
+                if !self.scope().var_exists(variable_name.as_bytes()) {
                     self.warnings.push(PhpError {
                         level: ErrorLevel::Warning,
                         message: format!("Undefined variable $ on line {}", bvv.start.line),
@@ -835,7 +843,7 @@ impl<'a> Evaluator<'a> {
                     return Ok(NULL);
                 }
 
-                Ok(self.env.get_var(variable_name.as_bytes()).unwrap())
+                Ok(self.scope().get_var(variable_name.as_bytes()).unwrap())
             }
         }
     }
@@ -858,7 +866,7 @@ impl<'a> Evaluator<'a> {
 
         let var_name = self.get_variable_name(var)?;
 
-        let current_var_value = self.env.get_var(&var_name);
+        let current_var_value = self.scope().get_var(&var_name);
 
         if current_var_value.is_none() {
             let error = format!("Undefined variable {}", get_string_from_bytes(&var_name));
@@ -895,10 +903,12 @@ impl<'a> Evaluator<'a> {
             _ => Ok(NULL),
         }?;
 
-        if !self.env.var_exists(&var_name) {
-            self.env.insert_var(&var_name, &new_value);
+        if !self.scope().var_exists(&var_name) {
+            self.scope().insert_var(&var_name, &new_value);
         } else {
-            let old_value = self.env.get_var_with_rc(&var_name).unwrap();
+            let env_borrow = self.scope();
+
+            let old_value = env_borrow.get_var_with_rc(&var_name).unwrap();
 
             *old_value.borrow_mut() = new_value.clone();
         }
@@ -910,7 +920,7 @@ impl<'a> Evaluator<'a> {
     fn get_var(&mut self, variable: &Variable) -> Result<PhpValue, PhpError> {
         let var_name = self.get_variable_name(variable)?;
 
-        let value = self.env.get_var(&var_name);
+        let value = self.scope().get_var(&var_name);
 
         if let Some(value) = value {
             Ok(value)

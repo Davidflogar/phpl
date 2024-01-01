@@ -9,6 +9,7 @@ use crate::parser::ast::traits::TraitStatement;
 use crate::parser::ast::traits::TraitUsage;
 use crate::parser::ast::traits::TraitUsageAdaptation;
 use crate::parser::ast::Statement;
+use crate::parser::error::expected_trait_name_before;
 use crate::parser::error::ParseResult;
 use crate::parser::internal::attributes;
 use crate::parser::internal::constants;
@@ -106,6 +107,12 @@ pub fn usage(state: &mut State) -> ParseResult<TraitUsage> {
                         }
                     },
                     TokenKind::Insteadof => {
+						let Some(r#trait) = r#trait else {
+							return Err(
+								expected_trait_name_before(method.span, method)
+							);
+						};
+
                         let mut insteadof = vec![
                             identifiers::full_type_name(state)?
                         ];

@@ -2,12 +2,21 @@ use std::{collections::HashMap, hash::Hash};
 
 use php_parser_rs::{
     lexer::token::Span,
-    parser::{self, ast::variables::Variable},
+    parser::{
+        self,
+        ast::{
+            modifiers::{MethodModifier, VisibilityModifier},
+            variables::Variable,
+        },
+    },
 };
 
 use crate::{
     evaluator::Evaluator,
-    php_value::primitive_data_types::{PhpError, PhpValue},
+    php_value::{
+        error::{ErrorLevel, PhpError},
+        primitive_data_types::PhpValue,
+    },
 };
 
 pub mod callable;
@@ -29,14 +38,12 @@ pub fn parse_php_file(
 ) -> Result<PhpValue, PhpError> {
     match parser::parse(content) {
         Ok(ast) => {
-            let mut child_evalutor = Evaluator::new(evaluator.env);
-
             let mut last_result = PhpValue::Null;
 
             for node in ast {
-                let result = child_evalutor.eval_statement(node);
+                let result = evaluator.eval_statement(node);
 
-                if child_evalutor.die || result.is_err() {
+                if evaluator.die || result.is_err() {
                     if let Err(error) = result {
                         evaluator.output = error.get_message(input);
                     }
@@ -46,25 +53,6 @@ pub fn parse_php_file(
 
                 last_result = result.unwrap();
             }
-
-            for warning in child_evalutor.warnings {
-                // Note that here, although the error is a warning,
-                // it is converted to an ErrorLevel::Raw so that
-                // the error is not modified when calling get_message() twice on the same error.
-
-                let new_warning = PhpError {
-                    level: crate::php_value::primitive_data_types::ErrorLevel::Raw,
-                    message: format!(
-                        "PHP Warning: {} in {} on line {}",
-                        warning.message, input, warning.line
-                    ),
-                    line: 0,
-                };
-
-                evaluator.warnings.push(new_warning);
-            }
-
-            evaluator.output += child_evalutor.output.as_str();
 
             Ok(last_result)
         }
@@ -76,7 +64,7 @@ pub fn parse_php_file(
             }
 
             Err(PhpError {
-                level: crate::php_value::primitive_data_types::ErrorLevel::Raw,
+                level: ErrorLevel::Raw,
                 message: format!("PHP Parse Error in {}: {}", input, err.unwrap()),
                 line: 0,
             })
@@ -88,11 +76,19 @@ pub fn get_string_from_bytes(var: &[u8]) -> String {
     String::from_utf8_lossy(var).to_string()
 }
 
-pub fn extend_hashmap_without_overwrite<T, V>(map: &mut HashMap<T, V>, other: HashMap<T, V>)
+pub fn extend_hashmap_without_overwrite<K, V>(map: &mut HashMap<K, V>, other: HashMap<K, V>)
 where
-    T: Eq + Hash,
+    K: Eq + Hash,
 {
     for (key, value) in other {
         map.entry(key).or_insert(value);
+    }
+}
+
+pub fn visibility_modifier_to_method_modifier(visibility: &VisibilityModifier) -> MethodModifier {
+    match visibility {
+        VisibilityModifier::Public(span) => MethodModifier::Public(*span),
+        VisibilityModifier::Protected(span) => MethodModifier::Protected(*span),
+        VisibilityModifier::Private(span) => MethodModifier::Private(*span),
     }
 }

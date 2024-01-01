@@ -13,8 +13,9 @@ use php_parser_rs::parser::ast::Statement;
 use crate::helpers::callable::php_value_matches_type;
 use crate::helpers::get_string_from_bytes;
 
+use super::argument_type::PhpArgumentType;
+use super::error::{ErrorLevel, PhpError};
 use super::objects::PhpObject;
-use super::php_argument_type::PhpArgumentType;
 
 pub const NULL: &str = "null";
 pub const BOOL: &str = "bool";
@@ -38,27 +39,6 @@ pub enum PhpValue {
     Object(PhpObject),
     Callable(PhpCallable),
     Resource(Resource),
-}
-
-#[derive(Debug, Clone)]
-pub struct PhpError {
-    pub level: ErrorLevel,
-    pub message: String,
-
-    /// Note that in many parts of the program this field will be set to 0.
-    /// This is because it is another part of the program that has the line
-    /// where the error was generated and not the part that creates the structure.
-    pub line: usize,
-}
-
-#[derive(Debug, Clone)]
-pub enum ErrorLevel {
-    Fatal,
-    Warning,
-
-    /// A Raw error should not be formatted with get_message().
-    /// And it is for private use.
-    Raw,
 }
 
 #[derive(Debug, Clone)]
@@ -86,7 +66,7 @@ pub struct CallableArgument {
 
 impl PartialEq for CallableArgument {
     fn eq(&self, other: &Self) -> bool {
-        if self.name.name.bytes != other.name.name.bytes {
+        if self.name.name != other.name.name {
             return false;
         }
 
@@ -260,7 +240,7 @@ impl PhpValue {
             PhpValue::Float(f) => *f as usize,
             PhpValue::Bool(b) => b.to_string().len(),
             PhpValue::Null => 0,
-            PhpValue::Callable(c) => c.name.bytes.len(),
+            PhpValue::Callable(c) => c.name.len(),
             PhpValue::String(s) => s.len(),
             PhpValue::Array(a) => a.len(),
             _ => 0,
@@ -278,7 +258,7 @@ impl PhpValue {
     // Returns the value as a string.
     pub fn printable(&self) -> Option<String> {
         match self {
-            PhpValue::Null => Some("NULL".to_string()),
+            PhpValue::Null => Some("".to_string()),
             PhpValue::Bool(b) => {
                 if *b {
                     Some("1".to_string())
@@ -291,7 +271,7 @@ impl PhpValue {
             PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
             PhpValue::Array(_) => None,
             PhpValue::Object(_) => None,
-            PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name.bytes)),
+            PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name)),
             PhpValue::Resource(_) => Some("Resource".to_string()),
         }
     }
@@ -305,7 +285,7 @@ impl PhpValue {
             PhpValue::Int(i) => Some(*i),
             PhpValue::Float(f) => Some(*f as i32),
             PhpValue::String(s) => {
-                let str_value = std::str::from_utf8(&s.bytes).unwrap();
+                let str_value = std::str::from_utf8(s).unwrap();
 
                 let int_value = str_value.parse();
 
@@ -324,7 +304,7 @@ impl PhpValue {
             PhpValue::Int(i) => Some(*i as f32),
             PhpValue::Float(f) => Some(*f),
             PhpValue::String(s) => {
-                let str_value = std::str::from_utf8(&s.bytes).unwrap();
+                let str_value = std::str::from_utf8(s).unwrap();
 
                 let float_value = str_value.parse();
 
@@ -512,25 +492,6 @@ impl PartialOrd for PhpValue {
     }
 }
 
-impl PhpError {
-    pub fn get_message(self, input: &str) -> String {
-        if let ErrorLevel::Raw = self.level {
-            return self.message;
-        }
-
-        let level_error = match self.level {
-            ErrorLevel::Fatal => "Fatal error",
-            ErrorLevel::Warning => "Warning",
-            _ => "",
-        };
-
-        format!(
-            "PHP {}: {} in {} on line {}",
-            level_error, self.message, input, self.line
-        )
-    }
-}
-
 impl From<String> for PhpError {
     fn from(message: String) -> Self {
         PhpError {
@@ -543,7 +504,7 @@ impl From<String> for PhpError {
 
 impl CallableArgument {
     /// Check that `arg` is valid for this argument.
-    pub fn is_valid(&self, arg: &mut PhpValue, called_in_line: usize) -> Option<PhpError> {
+    pub fn is_valid(&self, arg: &mut PhpValue, called_in_line: usize) -> Result<(), PhpError> {
         let self_has_type = &self.data_type;
 
         if self_has_type.is_some() {
@@ -552,6 +513,6 @@ impl CallableArgument {
             return php_value_matches_type(self_type, arg, called_in_line);
         }
 
-        None
+        Ok(())
     }
 }

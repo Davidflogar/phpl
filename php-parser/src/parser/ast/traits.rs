@@ -106,7 +106,7 @@ pub enum TraitUsageAdaptation {
         visibility: VisibilityModifier,
     },
     Precedence {
-        r#trait: Option<SimpleIdentifier>,
+        r#trait: SimpleIdentifier,
         method: SimpleIdentifier,
         insteadof: Vec<SimpleIdentifier>,
     },

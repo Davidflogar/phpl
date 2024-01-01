@@ -1,11 +1,12 @@
-//! This file contains commonly used functions that return errors.
-//! Only include functions that are intended to be used more than once.
-
 use php_parser_rs::lexer::byte_string::ByteString;
 
 use crate::{
     helpers::get_string_from_bytes,
-    php_value::primitive_data_types::{ErrorLevel, PhpError, NULL},
+    php_value::{
+        error::{ErrorLevel, PhpError},
+        objects::PhpObjectType,
+        primitive_data_types::NULL,
+    },
 };
 
 pub fn expected_type_but_got(r#type: &str, given: String, line: usize) -> PhpError {
@@ -56,7 +57,7 @@ pub fn cannot_redeclare_method(class_name: &str, method: ByteString, line: usize
         message: format!(
             "Cannot redeclare {}::{}()",
             class_name,
-            get_string_from_bytes(&method.bytes),
+            get_string_from_bytes(&method),
         ),
         line,
     }
@@ -68,7 +69,7 @@ pub fn cannot_redeclare_property(class_name: &str, property: ByteString, line: u
         message: format!(
             "Cannot redeclare {}::{}",
             class_name,
-            get_string_from_bytes(&property.bytes),
+            get_string_from_bytes(&property),
         ),
         line,
     }
@@ -90,11 +91,17 @@ pub fn cannot_use_default_value_for_parameter(
     }
 }
 
-pub fn cannot_redeclare_class(name: &[u8], line: usize) -> PhpError {
+pub fn cannot_redeclare_object(name: &[u8], line: usize, object_type: PhpObjectType) -> PhpError {
+    let object_type = match object_type {
+        PhpObjectType::Class => "class",
+        PhpObjectType::Trait => "trait",
+    };
+
     PhpError {
         level: ErrorLevel::Fatal,
         message: format!(
-            "Cannot declare class {} because the name is already in use",
+            "Cannot declare {} {} because the name is already in use",
+            object_type,
             get_string_from_bytes(name)
         ),
         line,
@@ -105,6 +112,54 @@ pub fn redefinition_of_parameter(name: &[u8], line: usize) -> PhpError {
     PhpError {
         level: ErrorLevel::Fatal,
         message: format!("Redefinition of parameter {}", get_string_from_bytes(name)),
+        line,
+    }
+}
+
+pub fn method_has_not_been_applied_because_of_collision(
+    method_name: &[u8],
+    bad_trait: &[u8],
+    class_name: &str,
+    collision_with: &[u8],
+    line: usize,
+) -> PhpError {
+    let method_name_str = get_string_from_bytes(method_name);
+
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!(
+            "Trait method {}::{} has not been applied as {}::{}, because of collision with {}::{}",
+            get_string_from_bytes(bad_trait),
+            method_name_str,
+            class_name,
+            method_name_str,
+            get_string_from_bytes(collision_with),
+            method_name_str,
+        ),
+        line,
+    }
+}
+
+pub fn abstract_method_has_not_been_applied_because_of_collision(
+    method_name: &[u8],
+    bad_trait: &[u8],
+    class_name: &str,
+    collision_with: &[u8],
+    line: usize,
+) -> PhpError {
+    let method_name_str = get_string_from_bytes(method_name);
+
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!(
+            "Trait abstract method {}::{} has not been applied as {}::{}, because of collision with {}::{}",
+            get_string_from_bytes(bad_trait),
+            method_name_str,
+            class_name,
+            method_name_str,
+            get_string_from_bytes(collision_with),
+            method_name_str,
+        ),
         line,
     }
 }

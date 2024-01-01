@@ -11,9 +11,9 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-	let abs_path = fs::canonicalize(&args[1])?;
+    let abs_path = fs::canonicalize(&args[1])?;
 
-	let file_name = abs_path.to_str().unwrap();
+    let file_name = abs_path.to_str().unwrap();
 
     let content = fs::read_to_string(file_name)?;
 

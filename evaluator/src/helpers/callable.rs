@@ -4,8 +4,9 @@ use crate::{
     errors::{self, cannot_use_default_value_for_parameter},
     evaluator::Evaluator,
     php_value::{
-        php_argument_type::PhpArgumentType,
-        primitive_data_types::{CallableArgument, PhpError, PhpValue},
+        argument_type::PhpArgumentType,
+        error::PhpError,
+        primitive_data_types::{CallableArgument, PhpValue},
     },
 };
 
@@ -18,11 +19,11 @@ pub fn php_value_matches_type(
     r#type: &PhpArgumentType,
     php_value: &mut PhpValue,
     line: usize,
-) -> Option<PhpError> {
+) -> Result<(), PhpError> {
     match r#type {
         PhpArgumentType::Nullable(r#type) => {
             if let PhpValue::Null = php_value {
-                return None;
+                return Ok(());
             }
 
             php_value_matches_type(r#type, php_value, line)
@@ -30,10 +31,10 @@ pub fn php_value_matches_type(
         PhpArgumentType::Union(types) => {
             let matches_any = types
                 .iter()
-                .any(|ty| php_value_matches_type(ty, php_value, line).is_none());
+                .any(|ty| php_value_matches_type(ty, php_value, line).is_ok());
 
             if !matches_any {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     &types
                         .iter()
                         .map(|ty| ty.to_string())
@@ -44,12 +45,12 @@ pub fn php_value_matches_type(
                 ));
             }
 
-            None
+            Ok(())
         }
         PhpArgumentType::Intersection(types) => {
             for ty in types {
-                if php_value_matches_type(ty, php_value, line).is_some() {
-                    return Some(errors::expected_type_but_got(
+                if php_value_matches_type(ty, php_value, line).is_err() {
+                    return Err(errors::expected_type_but_got(
                         &types
                             .iter()
                             .map(|ty| ty.to_string())
@@ -61,22 +62,22 @@ pub fn php_value_matches_type(
                 }
             }
 
-            None
+            Ok(())
         }
         PhpArgumentType::Null => {
             if !matches!(php_value, PhpValue::Null) {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "null",
                     php_value.get_type_as_string(),
                     line,
                 ));
             }
 
-            None
+            Ok(())
         }
         PhpArgumentType::True => {
             let PhpValue::Bool(b) = *php_value else {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "true",
                     php_value.get_type_as_string(),
                     line,
@@ -84,7 +85,7 @@ pub fn php_value_matches_type(
             };
 
             if !b {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "true",
                     php_value.get_type_as_string(),
                     line,
@@ -93,11 +94,11 @@ pub fn php_value_matches_type(
 
             *php_value = PhpValue::Bool(true);
 
-            None
+            Ok(())
         }
         PhpArgumentType::False => {
             let PhpValue::Bool(b) = php_value else {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "false",
                     php_value.get_type_as_string(),
                     line,
@@ -105,7 +106,7 @@ pub fn php_value_matches_type(
             };
 
             if *b {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "false",
                     php_value.get_type_as_string(),
                     line,
@@ -114,13 +115,13 @@ pub fn php_value_matches_type(
 
             *php_value = PhpValue::Bool(false);
 
-            None
+            Ok(())
         }
         PhpArgumentType::Float => {
             let to_float = php_value.to_float();
 
             if to_float.is_none() {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "float",
                     php_value.get_type_as_string(),
                     line,
@@ -129,24 +130,24 @@ pub fn php_value_matches_type(
 
             *php_value = PhpValue::Float(to_float.unwrap());
 
-            None
+            Ok(())
         }
         PhpArgumentType::Bool => {
             if !matches!(php_value, PhpValue::Bool(_)) {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "boolean",
                     php_value.get_type_as_string(),
                     line,
                 ));
             }
 
-            None
+            Ok(())
         }
         PhpArgumentType::Int => {
             let is_int = php_value.to_int();
 
             if is_int.is_none() {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "int",
                     php_value.get_type_as_string(),
                     line,
@@ -155,13 +156,13 @@ pub fn php_value_matches_type(
 
             *php_value = PhpValue::Int(is_int.unwrap());
 
-            None
+            Ok(())
         }
         PhpArgumentType::String => {
             let is_string = php_value.to_string();
 
             if is_string.is_none() {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "string",
                     php_value.get_type_as_string(),
                     line,
@@ -170,41 +171,41 @@ pub fn php_value_matches_type(
 
             *php_value = PhpValue::String(is_string.unwrap().into());
 
-            None
+            Ok(())
         }
         PhpArgumentType::Array => {
             if !matches!(php_value, PhpValue::Array(_)) {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "array",
                     php_value.get_type_as_string(),
                     line,
                 ));
             }
 
-            None
+            Ok(())
         }
         PhpArgumentType::Object => {
             if !matches!(php_value, PhpValue::Object(_)) {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "object",
                     php_value.get_type_as_string(),
                     line,
                 ));
             }
 
-            None
+            Ok(())
         }
-        PhpArgumentType::Mixed => None,
+        PhpArgumentType::Mixed => Ok(()),
         PhpArgumentType::Callable => {
             if !matches!(php_value, PhpValue::Callable(_)) {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     "callable",
                     php_value.get_type_as_string(),
                     line,
                 ));
             }
 
-            None
+            Ok(())
         }
         PhpArgumentType::Iterable => todo!(),
         PhpArgumentType::StaticReference => unreachable!(),
@@ -212,7 +213,7 @@ pub fn php_value_matches_type(
         PhpArgumentType::ParentReference => todo!(),
         PhpArgumentType::Named(object) => {
             let PhpValue::Object(given_object) = php_value else {
-				return Some(errors::expected_type_but_got(
+				return Err(errors::expected_type_but_got(
 					&object.get_name(),
 					php_value.get_type_as_string(),
 					line,
@@ -222,14 +223,14 @@ pub fn php_value_matches_type(
             let instance_of = given_object.instance_of(object);
 
             if !instance_of {
-                return Some(errors::expected_type_but_got(
+                return Err(errors::expected_type_but_got(
                     &object.get_name(),
                     php_value.get_type_as_string(),
                     line,
                 ));
             }
 
-            None
+            Ok(())
         }
     }
 }
@@ -242,9 +243,9 @@ pub fn parse_function_parameter_list(
     let mut declared_args = vec![];
 
     for arg in params {
-        if declared_args.contains(&arg.name.name.bytes) {
+        if declared_args.contains(&arg.name.name) {
             return Err(errors::redefinition_of_parameter(
-                &arg.name.name.bytes,
+                &arg.name.name,
                 arg.name.span.line,
             ));
         }
@@ -258,15 +259,15 @@ pub fn parse_function_parameter_list(
             // TODO: The data type conversion should not be done in this case
             // and only the actual data type should be accepted.
             let is_not_valid = php_value_matches_type(
-                &PhpArgumentType::from_type(default_data_type, evaluator.env)?,
+                &PhpArgumentType::from_type(default_data_type, &evaluator.env.borrow_mut())?,
                 &mut default_expression,
                 0,
             );
 
-            if is_not_valid.is_some() {
+            if is_not_valid.is_err() {
                 return Err(cannot_use_default_value_for_parameter(
                     default_expression.get_type_as_string(),
-                    get_string_from_bytes(&arg.name.name.bytes),
+                    get_string_from_bytes(&arg.name.name),
                     default_data_type.to_string(),
                     default_data_type.first_span().line,
                 ));
@@ -278,7 +279,10 @@ pub fn parse_function_parameter_list(
         let mut data_type: Option<PhpArgumentType> = None;
 
         if let Some(arg_data_type) = arg.data_type {
-            data_type = Some(PhpArgumentType::from_type(&arg_data_type, evaluator.env)?);
+            data_type = Some(PhpArgumentType::from_type(
+                &arg_data_type,
+                &evaluator.env.borrow_mut(),
+            )?);
         };
 
         callable_args.push(CallableArgument {
@@ -288,7 +292,7 @@ pub fn parse_function_parameter_list(
             is_variadic: arg.ellipsis.is_some(),
         });
 
-        declared_args.push(arg.name.name.bytes);
+        declared_args.push(arg.name.name);
     }
 
     Ok(callable_args)
