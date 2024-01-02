@@ -160,8 +160,6 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
         new_object.set_parent(parent_object);
     }
 
-    println!("{:#?}", new_object);
-
     evaluator
         .scope()
         .new_object(new_object, PhpObjectType::Class)?;
