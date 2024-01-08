@@ -124,3 +124,22 @@ To use this project, follow these steps:
    git clone https://github.com/Davidflogar/phpl
    cd phpl
    cargo r file.php # or you can build the project
+
+## Differences between phpl and the normal php interpreter
+
+1. Declaring variables does not return any value. Example in normal php:
+
+	```php
+	$b = $a = 1;
+	// $b is 1
+	```
+
+	Example in phpl:
+
+	```php
+	$b = $a = 1;
+	// $b is null
+
+2. When instantiating a class in phpl, after executing the constructor, the constructor is deleted, although the function still exists, the body will be empty
+
+There are still some undocumented differences, so this list will expand over time.

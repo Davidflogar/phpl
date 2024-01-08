@@ -368,7 +368,7 @@ impl Evaluator {
                         self.scope()
                             .insert_var_rc(&left_var_name, cloned_right_value);
 
-                        return Ok(right_value.borrow().clone());
+                        return Ok(NULL);
                     } else {
                         let right_value = self.eval_expression(right)?;
 
@@ -379,10 +379,10 @@ impl Evaluator {
 
                             let old_value = env_borrow.get_var_with_rc(&left_var_name).unwrap();
 
-                            *old_value.borrow_mut() = right_value.clone();
+                            *old_value.borrow_mut() = right_value;
                         }
 
-                        Ok(right_value)
+                        Ok(NULL)
                     }
                 }
                 AssignmentOperationExpression::Addition {

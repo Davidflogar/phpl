@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Not, Rem, Shl, Shr, Sub};
+use std::rc::Rc;
 
 use php_parser_rs::lexer::byte_string::ByteString;
 use php_parser_rs::lexer::token::Span;
@@ -26,6 +27,7 @@ pub const ARRAY: &str = "array";
 pub const OBJECT: &str = "object";
 pub const CALLABLE: &str = "callable";
 pub const RESOURCE: &str = "resource";
+pub const REFERENCE: &str = "reference";
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -39,6 +41,7 @@ pub enum PhpValue {
     Object(PhpObject),
     Callable(PhpCallable),
     Resource(Resource),
+	Reference(Rc<PhpValue>),
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +140,7 @@ impl PhpValue {
             PhpValue::Object(_) => OBJECT.to_string(),
             PhpValue::Callable(_) => CALLABLE.to_string(),
             PhpValue::Resource(_) => RESOURCE.to_string(),
+			PhpValue::Reference(_) => REFERENCE.to_string(),
         }
     }
 
@@ -180,6 +184,7 @@ impl PhpValue {
             PhpValue::Object(_) => true,
             PhpValue::Callable(_) => true,
             PhpValue::Resource(_) => true,
+			PhpValue::Reference(_) => true,
         }
     }
 
@@ -273,6 +278,7 @@ impl PhpValue {
             PhpValue::Object(_) => None,
             PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name)),
             PhpValue::Resource(_) => Some("Resource".to_string()),
+			PhpValue::Reference(value) => value.printable(),
         }
     }
 
