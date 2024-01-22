@@ -16,7 +16,7 @@ use crate::{
     },
     evaluator::Evaluator,
     helpers::{
-        callable::{parse_function_parameter_list, php_value_matches_type},
+        callable::{eval_function_parameter_list, php_value_matches_type},
         get_string_from_bytes,
         object::property_has_valid_default_value,
     },
@@ -43,8 +43,7 @@ pub fn constant(
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "Cannot redefine class constant {}::{}",
-                    class_name,
-                    get_string_from_bytes(&entry.name.value)
+                    class_name, entry.name.value
                 ),
                 line: entry.name.span.line,
             });
@@ -53,7 +52,7 @@ pub fn constant(
         let attributes = constant.attributes.clone();
         let modifiers = constant.modifiers.clone();
 
-        let expr_result = evaluator.eval_expression(&entry.value)?;
+        let expr_result = evaluator.eval_expression(entry.value)?;
 
         consts.insert(
             entry.name.value.bytes,
@@ -93,14 +92,14 @@ pub fn property(
                     ));
                 }
 
-                let expr_value = evaluator.eval_expression(&value)?;
+                let expr_value = evaluator.eval_expression(value)?;
 
                 property_has_valid_default_value(
                     r#type.as_ref(),
                     &expr_value,
                     equals.line,
                     class_name,
-                    get_string_from_bytes(&variable.name).as_str(),
+                    variable.name.to_string().as_str(),
                 )?;
 
                 let property = PhpObjectProperty {
@@ -164,20 +163,18 @@ pub fn abstract_method(
             level: ErrorLevel::Fatal,
             message: format!(
                 "Abstract function {}::{}() cannot be declared private",
-                class_name,
-                get_string_from_bytes(&method.name.value),
+                class_name, method.name.value,
             ),
             line: span.line,
         });
     }
 
-    let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
+    let method_args = eval_function_parameter_list(method.parameters, evaluator)?;
 
     let abstract_method = PhpObjectAbstractMethod {
         attributes: method.attributes,
         modifiers: method.modifiers,
         return_by_reference: method.ampersand.is_some(),
-        name: method.name.clone(),
         parameters: method_args,
         return_type: method.return_type,
     };
@@ -201,13 +198,12 @@ pub fn abstract_constructor(
         ));
     }
 
-    let method_args = parse_function_parameter_list(constructor.parameters, evaluator)?;
+    let method_args = eval_function_parameter_list(constructor.parameters, evaluator)?;
 
     Ok(PhpObjectAbstractMethod {
         attributes: constructor.attributes,
         modifiers: constructor.modifiers,
         return_by_reference: constructor.ampersand.is_some(),
-        name: constructor.name,
         parameters: method_args,
         return_type: None,
     })
@@ -230,15 +226,15 @@ pub fn concrete_method(
         ));
     }
 
-    let method_args = parse_function_parameter_list(method.parameters, evaluator)?;
+    let method_args = eval_function_parameter_list(method.parameters, evaluator)?;
 
     methods.insert(
-        method.name.value.bytes.clone(),
+        method.name.value.bytes,
         PhpObjectConcreteMethod {
             attributes: method.attributes,
             modifiers: method.modifiers,
             return_by_reference: method.ampersand.is_some(),
-            name: method.name,
+			name_span: method.name.span,
             parameters: method_args,
             return_type: method.return_type,
             body: method.body,
@@ -271,18 +267,18 @@ pub fn concrete_constructor(
         let mut default_value = None;
 
         if let (Some(default), Some(r#type)) = (default_value_expression, data_type) {
-            let mut php_value = evaluator.eval_expression(&default)?;
+            let php_value = evaluator.eval_expression(default)?;
 
             let err = php_value_matches_type(
-                &PhpArgumentType::from_type(&r#type, &evaluator.env.borrow_mut())?,
-                &mut php_value,
+                &PhpArgumentType::from_type(&r#type, &evaluator.scope())?,
+                &php_value,
                 param.name.span.line,
             );
 
             if err.is_err() {
                 return Err(cannot_use_default_value_for_parameter(
                     php_value.get_type_as_string(),
-                    get_string_from_bytes(&param.name.name),
+                    param.name.name.to_string(),
                     r#type.to_string(),
                     param.name.span.line,
                 ));
@@ -323,12 +319,12 @@ pub fn concrete_constructor(
     }
 
     Ok(PhpObjectConcreteConstructor {
-        attributes: constructor.attributes.clone(),
-        modifiers: constructor.modifiers.clone(),
+        attributes: constructor.attributes,
+        modifiers: constructor.modifiers,
         return_by_reference: constructor.ampersand.is_some(),
-        name: constructor.name.clone(),
+        name: constructor.name,
         parameters: args,
-        body: constructor.body.clone(),
+        body: constructor.body,
     })
 }
 
@@ -380,7 +376,7 @@ pub fn trait_usage(
                     let Some(trait_object) = trait_object_option else {
 						return Err(PhpError {
 							level: ErrorLevel::Fatal,
-							message: format!("Trait \"{}\" was not added to {}", get_string_from_bytes(&trait_name.value.bytes), class_name),
+							message: format!("Trait \"{}\" was not added to {}", trait_name.value, class_name),
 							line: trait_name.span.line,
 						});
 					};
@@ -424,7 +420,7 @@ pub fn trait_usage(
                             });
                         }
 
-                        found_in = get_string_from_bytes(&trait_object.name.value);
+                        found_in = trait_object.name.value.to_string();
 
                         trait_object.set_alias(
                             &method.value,
@@ -447,7 +443,7 @@ pub fn trait_usage(
                     let Some(trait_object) = trait_object_option else {
 						return Err(PhpError {
 							level: ErrorLevel::Fatal,
-							message: format!("Trait \"{}\" was not added to {}", get_string_from_bytes(&trait_name.value.bytes), class_name),
+							message: format!("Trait \"{}\" was not added to {}", trait_name.value, class_name),
 							line: trait_name.span.line,
 						});
 					};
@@ -490,7 +486,7 @@ pub fn trait_usage(
                             });
                         }
 
-                        found_in = get_string_from_bytes(&trait_object.name.value);
+                        found_in = trait_object.name.value.to_string();
 
                         trait_object.set_visibility(
                             &method.value,
@@ -512,8 +508,7 @@ pub fn trait_usage(
 
                         message: format!(
                             "Trait \"{}\" was not added to {}",
-                            get_string_from_bytes(&r#trait.value),
-                            class_name
+                            r#trait.value, class_name
                         ),
                         line: r#trait.span.line,
                     });
@@ -525,9 +520,9 @@ pub fn trait_usage(
 							level: ErrorLevel::Fatal,
 							message: format!(
 								"Inconsistent insteadof definition. The method {} is to be used from {}, but {} is also on the exclude list",
-								get_string_from_bytes(&method.value),
-								get_string_from_bytes(&r#trait.value),
-								get_string_from_bytes(&r#trait.value),
+								method,
+								r#trait,
+								r#trait,
 							),
 							line: insteadof.span.line,
 						});
@@ -536,7 +531,7 @@ pub fn trait_usage(
                     let Some(trait_object) = used_traits.get_mut(&insteadof.value.bytes) else {
 						return Err(PhpError {
 							level: ErrorLevel::Fatal,
-							message: format!("Trait \"{}\" was not added to {}", get_string_from_bytes(&insteadof.value), class_name),
+							message: format!("Trait \"{}\" was not added to {}", insteadof, class_name),
 							line: insteadof.span.line,
 						});
 					};

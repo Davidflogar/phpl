@@ -1,8 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, mem};
 
 use php_parser_rs::{
     lexer::token::Span,
     parser::ast::{
+        arguments::ArgumentList,
         attributes::AttributeGroup,
         data_type::Type,
         functions::{MethodBody, ReturnType},
@@ -14,14 +15,18 @@ use php_parser_rs::{
     },
 };
 
-use crate::helpers::{
-    extend_hashmap_without_overwrite, get_string_from_bytes, visibility_modifier_to_method_modifier,
+use crate::{
+    evaluator::Evaluator,
+    helpers::{
+        extend_hashmap_without_overwrite, get_string_from_bytes,
+        visibility_modifier_to_method_modifier,
+    },
 };
 
 use super::{
     error::{ErrorLevel, PhpError},
     macros::impl_utils_for_php_objects,
-    primitive_data_types::{CallableArgument, PhpValue},
+    primitive_data_types::{PhpFunctionArgument, PhpValue},
 };
 
 impl_utils_for_php_objects!(PhpClass, PhpAbstractClass);
@@ -110,6 +115,37 @@ pub struct PhpClass {
     pub constructor: Option<PhpObjectConcreteConstructor>,
 }
 
+impl PhpClass {
+    /// This function is called when the class is instantiated.
+    pub fn call_constructor(
+        &mut self,
+        evaluator: &mut Evaluator,
+        _arguments: Option<ArgumentList>,
+    ) -> Result<(), PhpError> {
+        let Some(constructor) = self.constructor.as_mut() else {
+			return Ok(());
+		};
+
+        if !constructor.parameters.is_empty() {
+            let mut required_args = vec![];
+
+            for arg in &constructor.parameters {
+                required_args.push(arg);
+            }
+
+            todo!()
+        }
+
+        let statements = mem::take(&mut constructor.body.statements);
+
+        for statement in statements {
+            evaluator.eval_statement(statement)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PhpObjectProperty {
     pub modifiers: PropertyModifierGroup,
@@ -131,8 +167,8 @@ pub struct PhpObjectConcreteMethod {
     pub attributes: Vec<AttributeGroup>,
     pub modifiers: MethodModifierGroup,
     pub return_by_reference: bool,
-    pub name: SimpleIdentifier,
-    pub parameters: Vec<CallableArgument>,
+	pub name_span: Span,
+    pub parameters: Vec<PhpFunctionArgument>,
     pub return_type: Option<ReturnType>,
     pub body: MethodBody,
 }
@@ -187,8 +223,7 @@ pub struct PhpObjectAbstractMethod {
     pub attributes: Vec<AttributeGroup>,
     pub modifiers: MethodModifierGroup,
     pub return_by_reference: bool,
-    pub name: SimpleIdentifier,
-    pub parameters: Vec<CallableArgument>,
+    pub parameters: Vec<PhpFunctionArgument>,
     pub return_type: Option<ReturnType>,
 }
 
@@ -232,11 +267,11 @@ impl PhpTrait {
                 level: ErrorLevel::Fatal,
                 message: format!(
 					"Trait method {}::{} has not been applied as {}::{}, because of collision with {}::{}",
-					get_string_from_bytes(&self.name.value),
+					&self.name.value.to_string(),
 					get_string_from_bytes(key),
 					class_name,
 					get_string_from_bytes(alias),
-					get_string_from_bytes(&self.name.value),
+					&self.name.value.to_string(),
 					get_string_from_bytes(alias),
 				),
                 line,
@@ -245,8 +280,6 @@ impl PhpTrait {
 
         if self.concrete_methods.contains_key(key) {
             let mut concrete_method = self.concrete_methods.remove(key).unwrap();
-
-            concrete_method.name.value.bytes = alias.to_vec();
 
             if let Some(visibility) = visibility {
                 concrete_method.modifiers.modifiers =
@@ -259,8 +292,6 @@ impl PhpTrait {
             return Ok(());
         } else if self.abstract_methods.contains_key(key) {
             let mut abstract_method = self.abstract_methods.remove(key).unwrap();
-
-            abstract_method.name.value.bytes = alias.to_vec();
 
             if let Some(visibility) = visibility {
                 abstract_method.modifiers.modifiers =
@@ -277,7 +308,7 @@ impl PhpTrait {
             level: ErrorLevel::Fatal,
             message: format!(
                 "An alias was defined for {}::{} but this method does not exist",
-                get_string_from_bytes(&self.name.value),
+                &self.name.value.to_string(),
                 get_string_from_bytes(key)
             ),
             line,

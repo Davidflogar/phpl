@@ -142,4 +142,6 @@ To use this project, follow these steps:
 
 2. When instantiating a class in phpl, after executing the constructor, the constructor is deleted, although the function still exists, the body will be empty
 
+3. PHPL will not attempt to convert a parameter to the correct data type when passed to a function. For example: if a function receives an integer, the data type of the passed parameter must be an integer and no attempt will be made to convert the parameter to an integer. That's how it is with all data types.
+
 There are still some undocumented differences, so this list will expand over time.

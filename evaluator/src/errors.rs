@@ -163,3 +163,19 @@ pub fn abstract_method_has_not_been_applied_because_of_collision(
         line,
     }
 }
+
+pub fn only_arrays_and_traversables_can_be_unpacked(line: usize) -> PhpError {
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: "Only arrays and Traversables can be unpacked".to_string(),
+        line,
+    }
+}
+
+pub fn type_is_not_callable(ty: String, line: usize) -> PhpError {
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!("Type {} is not callable", ty),
+        line,
+    }
+}

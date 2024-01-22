@@ -36,8 +36,8 @@ pub fn function_parameter_list(
 
                 let is_not_valid = ty_some.is_valid_argument_type(class_context);
 
-                if is_not_valid.is_some() {
-                    return Err(is_not_valid.unwrap());
+                if let Some(error) = is_not_valid {
+                    return Err(error);
                 }
             }
 

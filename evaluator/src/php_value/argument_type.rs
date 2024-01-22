@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use php_parser_rs::parser::ast::data_type::Type;
 
-use crate::{helpers::get_string_from_bytes, scope::Scope};
+use crate::scope::Scope;
 
 use super::{
     error::{ErrorLevel, PhpError},
@@ -44,8 +44,7 @@ impl PhpArgumentType {
                 let Some(object) = scope.get_object(name) else {
 					return Err(PhpError {
 						level: ErrorLevel::Fatal,
-						message: format!("Undefined type {}",
-						get_string_from_bytes(name)),
+						message: format!("Undefined type {}", name),
 						line: span.line
 					})
 				};

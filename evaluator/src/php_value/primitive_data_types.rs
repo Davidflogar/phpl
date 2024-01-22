@@ -1,18 +1,16 @@
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Not, Rem, Shl, Shr, Sub};
 use std::rc::Rc;
 
-use php_parser_rs::lexer::byte_string::ByteString;
-use php_parser_rs::lexer::token::Span;
 use php_parser_rs::parser::ast::attributes::AttributeGroup;
 use php_parser_rs::parser::ast::functions::ReturnType;
 use php_parser_rs::parser::ast::variables::SimpleVariable;
 use php_parser_rs::parser::ast::Statement;
 
 use crate::helpers::callable::php_value_matches_type;
-use crate::helpers::get_string_from_bytes;
 
 use super::argument_type::PhpArgumentType;
 use super::error::{ErrorLevel, PhpError};
@@ -27,7 +25,6 @@ pub const ARRAY: &str = "array";
 pub const OBJECT: &str = "object";
 pub const CALLABLE: &str = "callable";
 pub const RESOURCE: &str = "resource";
-pub const REFERENCE: &str = "reference";
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -36,12 +33,12 @@ pub enum PhpValue {
     Bool(bool),
     Int(i32),
     Float(f32),
-    String(ByteString),
+    String(Vec<u8>),
     Array(HashMap<PhpValue, PhpValue>),
     Object(PhpObject),
     Callable(PhpCallable),
     Resource(Resource),
-	Reference(Rc<PhpValue>),
+    Reference(Rc<RefCell<PhpValue>>),
 }
 
 #[derive(Debug, Clone)]
@@ -50,24 +47,23 @@ pub enum Resource {}
 #[derive(Debug, Clone)]
 pub struct PhpCallable {
     pub attributes: Vec<AttributeGroup>,
-    pub span: Span,
     pub return_by_reference: bool,
-    pub name: ByteString,
-    pub parameters: Vec<CallableArgument>,
+    pub parameters: Vec<PhpFunctionArgument>,
     pub return_type: Option<ReturnType>,
     pub body: Vec<Statement>,
     pub is_method: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct CallableArgument {
+pub struct PhpFunctionArgument {
     pub name: SimpleVariable,
     pub data_type: Option<PhpArgumentType>,
     pub default_value: Option<PhpValue>,
     pub is_variadic: bool,
+    pub pass_by_reference: bool,
 }
 
-impl PartialEq for CallableArgument {
+impl PartialEq for PhpFunctionArgument {
     fn eq(&self, other: &Self) -> bool {
         if self.name.name != other.name.name {
             return false;
@@ -102,31 +98,72 @@ impl PartialEq for CallableArgument {
 }
 
 impl PhpValue {
-    /// Performs a power operation on two values.
-    pub fn pow(self, value: PhpValue) -> Result<PhpValue, PhpError> {
-        match (self, value) {
-            (PhpValue::Int(i), PhpValue::Int(j)) => Ok(PhpValue::Int(i.pow(j as u32))),
-            (PhpValue::Float(f), PhpValue::Float(g)) => Ok(PhpValue::Float(f.powf(g))),
-            (PhpValue::Int(i), PhpValue::Float(f)) => {
-                let i = i as f32;
-
-                Ok(PhpValue::Float(i.powf(f)))
-            }
-            (PhpValue::Float(f), PhpValue::Int(i)) => {
-                let i = i as f32;
-
-                Ok(PhpValue::Float(f.powf(i)))
-            }
-            _ => {
-                let error_message = "Unsupported operation".to_string();
-
-                Err(PhpError {
-                    level: ErrorLevel::Fatal,
-                    message: error_message,
-                    line: 0,
-                })
-            }
+    pub fn is_null(&self) -> bool {
+        match self {
+            PhpValue::Null => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_null(),
+            _ => false,
         }
+    }
+
+    pub fn is_bool(&self) -> bool {
+        match self {
+            PhpValue::Bool(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_bool(),
+            _ => false,
+        }
+    }
+
+    pub fn is_int(&self) -> bool {
+        match self {
+            PhpValue::Int(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_int(),
+            _ => false,
+        }
+    }
+
+    pub fn is_float(&self) -> bool {
+        match self {
+            PhpValue::Float(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_float(),
+            _ => false,
+        }
+    }
+
+    pub fn is_string(&self) -> bool {
+        match self {
+            PhpValue::String(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_string(),
+            _ => false,
+        }
+    }
+
+    pub fn is_array(&self) -> bool {
+        match self {
+            PhpValue::Array(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_array(),
+            _ => false,
+        }
+    }
+
+    pub fn is_object(&self) -> bool {
+        match self {
+            PhpValue::Object(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_object(),
+            _ => false,
+        }
+    }
+
+    pub fn is_callable(&self) -> bool {
+        match self {
+            PhpValue::Callable(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_callable(),
+            _ => false,
+        }
+    }
+
+    pub fn pow(self, value: PhpValue) -> Result<PhpValue, PhpError> {
+        self.perform_arithmetic_operation("**", value, |a, b| a.powf(b))
     }
 
     pub fn get_type_as_string(&self) -> String {
@@ -140,14 +177,13 @@ impl PhpValue {
             PhpValue::Object(_) => OBJECT.to_string(),
             PhpValue::Callable(_) => CALLABLE.to_string(),
             PhpValue::Resource(_) => RESOURCE.to_string(),
-			PhpValue::Reference(_) => REFERENCE.to_string(),
+            PhpValue::Reference(ref_value) => ref_value.borrow().get_type_as_string(),
         }
     }
 
-    /// Concatenates two values.
     pub fn concat(self, value: PhpValue) -> Result<PhpValue, PhpError> {
-        let self_as_string = self.printable();
-        let value_as_string = value.printable();
+        let self_as_string = self.as_string();
+        let value_as_string = value.as_string();
 
         if self_as_string.is_none() || value_as_string.is_none() {
             let error_message = format!(
@@ -168,23 +204,19 @@ impl PhpValue {
         ))
     }
 
-    pub fn is_null(&self) -> bool {
-        matches!(self, PhpValue::Null)
-    }
-
     /// Checks if the value is "true" in PHP terms.
-    pub fn true_in_php(self) -> bool {
+    pub fn true_in_php(&self) -> bool {
         match self {
             PhpValue::Null => false,
-            PhpValue::Bool(b) => b,
-            PhpValue::Int(i) => i != 0,
-            PhpValue::Float(f) => f != 0.0,
-            PhpValue::String(s) => s.len() > 0,
+            PhpValue::Bool(b) => *b,
+            PhpValue::Int(i) => *i != 0,
+            PhpValue::Float(f) => *f != 0.0,
+            PhpValue::String(s) => !s.is_empty(),
             PhpValue::Array(a) => !a.is_empty(),
             PhpValue::Object(_) => true,
             PhpValue::Callable(_) => true,
             PhpValue::Resource(_) => true,
-			PhpValue::Reference(_) => true,
+            PhpValue::Reference(ref_value) => ref_value.borrow().true_in_php(),
         }
     }
 
@@ -212,8 +244,8 @@ impl PhpValue {
             });
         }
 
-        let left_float = self.to_float();
-        let right_float = rhs.to_float();
+        let left_float = self.as_float();
+        let right_float = rhs.as_float();
 
         if left_float.is_none() || right_float.is_none() {
             return Err(PhpError {
@@ -243,11 +275,12 @@ impl PhpValue {
         match self {
             PhpValue::Int(i) => *i as usize,
             PhpValue::Float(f) => *f as usize,
-            PhpValue::Bool(b) => b.to_string().len(),
+            PhpValue::Bool(b) => (*b).into(),
             PhpValue::Null => 0,
-            PhpValue::Callable(c) => c.name.len(),
+            PhpValue::Callable(_) => 1,
             PhpValue::String(s) => s.len(),
             PhpValue::Array(a) => a.len(),
+            PhpValue::Reference(ref_value) => ref_value.borrow().get_size(),
             _ => 0,
         }
     }
@@ -256,6 +289,7 @@ impl PhpValue {
         match self {
             PhpValue::Array(_) => true,
             // TODO: PhpValue::Object(o) => o.is_instance_of("iterable"),
+            PhpValue::Reference(ref_value) => ref_value.borrow().is_iterable(),
             _ => false,
         }
     }
@@ -276,9 +310,9 @@ impl PhpValue {
             PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
             PhpValue::Array(_) => None,
             PhpValue::Object(_) => None,
-            PhpValue::Callable(c) => Some(get_string_from_bytes(&c.name)),
+            PhpValue::Callable(_) => None,
             PhpValue::Resource(_) => Some("Resource".to_string()),
-			PhpValue::Reference(value) => value.printable(),
+            PhpValue::Reference(value) => value.borrow().printable(),
         }
     }
 
@@ -286,26 +320,7 @@ impl PhpValue {
      * Functions to convert to a data type.
      */
 
-    pub fn to_int(&self) -> Option<i32> {
-        match self {
-            PhpValue::Int(i) => Some(*i),
-            PhpValue::Float(f) => Some(*f as i32),
-            PhpValue::String(s) => {
-                let str_value = std::str::from_utf8(s).unwrap();
-
-                let int_value = str_value.parse();
-
-                if int_value.is_err() {
-                    return None;
-                }
-
-                Some(int_value.unwrap())
-            }
-            _ => None,
-        }
-    }
-
-    pub fn to_float(&self) -> Option<f32> {
+    pub fn as_float(&self) -> Option<f32> {
         match self {
             PhpValue::Int(i) => Some(*i as f32),
             PhpValue::Float(f) => Some(*f),
@@ -320,15 +335,25 @@ impl PhpValue {
 
                 Some(float_value.unwrap())
             }
+            PhpValue::Reference(ref_value) => ref_value.borrow().as_float(),
             _ => None,
         }
     }
 
-    pub fn to_string(&self) -> Option<String> {
+    pub fn as_string(&self) -> Option<String> {
         match self {
             PhpValue::Int(i) => Some(i.to_string()),
             PhpValue::Float(f) => Some(f.to_string()),
             PhpValue::String(s) => Some(String::from_utf8_lossy(s).to_string()),
+            PhpValue::Reference(ref_value) => ref_value.borrow().as_string(),
+            _ => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            PhpValue::Bool(b) => Some(*b),
+            PhpValue::Reference(ref_value) => ref_value.borrow().as_bool(),
             _ => None,
         }
     }
@@ -366,7 +391,7 @@ impl Div for PhpValue {
     type Output = Result<PhpValue, PhpError>;
 
     fn div(self, rhs: Self) -> Self::Output {
-        let right_to_float = rhs.to_float();
+        let right_to_float = rhs.as_float();
 
         if right_to_float.is_none() {
             return Err(PhpError {
@@ -466,7 +491,7 @@ impl Not for PhpValue {
             PhpValue::Bool(b) => Ok(PhpValue::Bool(!b)),
             PhpValue::Int(i) => Ok(PhpValue::Bool(i == 0)),
             PhpValue::Float(f) => Ok(PhpValue::Bool(f == 0.0)),
-            PhpValue::String(s) => Ok(PhpValue::Bool(s.len() == 0)),
+            PhpValue::String(s) => Ok(PhpValue::Bool(s.is_empty())),
             PhpValue::Null => Ok(PhpValue::Bool(true)),
             PhpValue::Array(a) => Ok(PhpValue::Bool(a.is_empty())),
             _ => {
@@ -508,17 +533,28 @@ impl From<String> for PhpError {
     }
 }
 
-impl CallableArgument {
+impl PhpFunctionArgument {
     /// Check that `arg` is valid for this argument.
-    pub fn is_valid(&self, arg: &mut PhpValue, called_in_line: usize) -> Result<(), PhpError> {
+    pub fn is_valid(&self, arg: &PhpValue, throw_error_in_line: usize) -> Result<(), PhpError> {
         let self_has_type = &self.data_type;
 
-        if self_has_type.is_some() {
-            let self_type = self_has_type.as_ref().unwrap();
-
-            return php_value_matches_type(self_type, arg, called_in_line);
+        if let Some(ref self_type) = self_has_type {
+            return php_value_matches_type(self_type, arg, throw_error_in_line);
         }
 
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+pub enum PhpIdentifier {
+    Constant(PhpValue),
+    Function(PhpCallable),
+}
+
+impl PhpIdentifier {
+    pub fn is_function(&self) -> bool {
+        matches!(self, PhpIdentifier::Function(_))
     }
 }

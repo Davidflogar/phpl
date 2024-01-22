@@ -69,7 +69,7 @@ mod macros {
 										let match_return_type = method.return_type == current_method.return_type;
 
 										if !match_return_by_ref || !match_parameters || !match_return_type {
-											let format_parameter = |parameter: &CallableArgument| -> String {
+											let format_parameter = |parameter: &PhpFunctionArgument| -> String {
 												let data_type_as_string = if let Some(r#type) = &parameter.data_type {
 													format!("{} ", r#type.to_string())
 												} else {
@@ -104,7 +104,7 @@ mod macros {
 														String::new()
 													}
 												),
-												line: current_method.name.span.line,
+												line: current_method.name_span.line,
 											});
 										}
 									}

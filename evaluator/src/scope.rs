@@ -8,7 +8,7 @@ use crate::{
     php_value::{
         error::{ErrorLevel, PhpError},
         objects::{PhpObject, PhpObjectType},
-        primitive_data_types::PhpValue,
+        primitive_data_types::{PhpIdentifier, PhpValue},
     },
 };
 
@@ -16,8 +16,8 @@ use crate::{
 pub struct Scope {
     vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
 
-    /// All identifiers, such as functions or constants.
-    identifiers: HashMap<Vec<u8>, PhpValue>,
+    /// Identifiers such as functions or constants.
+    identifiers: HashMap<Vec<u8>, PhpIdentifier>,
 
     objects: HashMap<Vec<u8>, PhpObject>,
 }
@@ -35,13 +35,25 @@ impl Scope {
         self.vars.remove(key);
     }
 
-    pub fn insert_var(&mut self, key: &[u8], value: &PhpValue) {
-        self.vars
-            .insert(key.to_vec(), Rc::new(RefCell::new(value.clone())));
-    }
+    /// Sets the value of a variable. If the variable does not exist, it is created.
+    /// But if the variable exists and is a reference, it is updated.
+    pub fn set_var_value(&mut self, key: &[u8], value: PhpValue) {
+        if let Some(var) = self.vars.get(key) {
+            let mut var_ref = var.borrow_mut();
 
-    pub fn insert_var_rc(&mut self, key: &[u8], value: Rc<RefCell<PhpValue>>) {
-        self.vars.insert(key.to_vec(), value);
+            match &mut *var_ref {
+                PhpValue::Reference(ref_value) => {
+                    *ref_value.borrow_mut() = value;
+                }
+                _ => {
+                    *var_ref = value;
+                }
+            }
+
+            return;
+        }
+
+        self.vars.insert(key.to_vec(), Rc::new(RefCell::new(value)));
     }
 
     pub fn get_var(&self, key: &[u8]) -> Option<PhpValue> {
@@ -64,21 +76,38 @@ impl Scope {
         self.vars.contains_key(key)
     }
 
-    pub fn get_var_with_rc(&self, key: &[u8]) -> Option<&Rc<RefCell<PhpValue>>> {
-        self.vars.get(key)
+    /// Returns a reference to the value of the variable. If the variable does not exist, it is created.
+    pub fn new_ref(&mut self, to: &[u8]) -> Rc<RefCell<PhpValue>> {
+        if !self.var_exists(to) {
+            self.set_var_value(to, PhpValue::Null);
+        }
+
+        let reference = self.vars.get(to).unwrap();
+
+        Rc::clone(reference)
     }
 
-    pub fn get_ident(&self, key: &[u8]) -> Option<PhpValue> {
-        self.identifiers.get(key).cloned()
+    pub fn get_ident(&self, key: &[u8]) -> Option<&PhpIdentifier> {
+        self.identifiers.get(key)
     }
 
-    pub fn new_ident(&mut self, ident: &[u8], value: PhpValue, span: Span) -> Result<(), PhpError> {
+    pub fn new_ident(
+        &mut self,
+        ident: &[u8],
+        value: PhpIdentifier,
+        span: Span,
+    ) -> Result<(), PhpError> {
         match self.identifiers.entry(ident.to_vec()) {
             std::collections::hash_map::Entry::Occupied(entry) => Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
-                    "Cannot redeclare identifier {}",
-                    get_string_from_bytes(entry.key())
+                    "Cannot redeclare identifier {}, there is already a {} using this name",
+                    get_string_from_bytes(entry.key()),
+                    if entry.get().is_function() {
+                        "function"
+                    } else {
+                        "constant"
+                    }
                 ),
                 line: span.line,
             }),

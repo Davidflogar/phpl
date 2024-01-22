@@ -12,17 +12,17 @@ use crate::{
 
 pub fn expression(
     evaluator: &mut Evaluator,
-    expression: &NewExpression,
+    expression: NewExpression,
 ) -> Result<PhpValue, PhpError> {
-    let target_name: Vec<u8>;
+    let mut target_name = vec![];
 
     if let Expression::Identifier(ref ident) = *expression.target {
         match ident {
-            Identifier::SimpleIdentifier(i) => target_name = i.value.bytes.clone(),
+            Identifier::SimpleIdentifier(i) => target_name.extend(&i.value.bytes),
             Identifier::DynamicIdentifier(_) => todo!(),
         }
     } else {
-        let value = evaluator.eval_expression(&expression.target)?;
+        let value = evaluator.eval_expression(*expression.target)?;
 
         let PhpValue::String(name) = value else {
             return Err(PhpError{
@@ -32,27 +32,42 @@ pub fn expression(
 			});
         };
 
-        target_name = name.bytes;
+        target_name.extend(&name);
     }
 
     let Some(object) = evaluator.scope().get_object(&target_name) else {
 		return Err(PhpError{
 			level: ErrorLevel::Fatal,
-			message: format!("Class {} not found", String::from_utf8_lossy(&target_name)),
+			message: format!("Class {} not found", get_string_from_bytes(&target_name)),
 			line: expression.new.line,
 		});
 	};
 
-    if let PhpObject::AbstractClass(_) = object {
-        return Err(PhpError {
-            level: ErrorLevel::Fatal,
-            message: format!(
-                "Cannot instantiate abstract class {}",
-                get_string_from_bytes(&target_name)
-            ),
-            line: expression.new.line,
-        });
-    }
+    let mut class = match object {
+        PhpObject::Class(class) => class,
+        PhpObject::AbstractClass(_) => {
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Cannot instantiate abstract class {}",
+                    get_string_from_bytes(&target_name)
+                ),
+                line: expression.new.line,
+            })
+        }
+        PhpObject::Trait(_) => {
+            return Err(PhpError {
+                level: ErrorLevel::Fatal,
+                message: format!(
+                    "Cannot instantiate trait {}",
+                    get_string_from_bytes(&target_name)
+                ),
+                line: expression.new.line,
+            })
+        }
+    };
 
-    Ok(PhpValue::Null)
+    class.call_constructor(evaluator, expression.arguments)?;
+
+    Ok(PhpValue::Object(PhpObject::Class(class)))
 }

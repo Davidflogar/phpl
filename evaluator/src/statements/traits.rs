@@ -5,7 +5,6 @@ use php_parser_rs::parser::ast::traits::{TraitMember, TraitStatement};
 use crate::{
     errors::cannot_redeclare_object,
     evaluator::Evaluator,
-    helpers::get_string_from_bytes,
     php_value::{
         error::PhpError,
         objects::{
@@ -30,7 +29,7 @@ pub fn statement(
         ));
     }
 
-    let class_name = get_string_from_bytes(&statement.name.value);
+    let class_name = statement.name.value.to_string();
 
     // get the properties, methods, and rest of the class body
     let mut properties = HashMap::new();

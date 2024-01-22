@@ -5,7 +5,6 @@ use php_parser_rs::parser::ast::classes::{ClassMember, ClassStatement};
 use crate::{
     errors::cannot_redeclare_object,
     evaluator::Evaluator,
-    helpers::get_string_from_bytes,
     php_value::{
         error::{ErrorLevel, PhpError},
         objects::{
@@ -29,7 +28,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
 
     let mut parent = None;
 
-    let class_name = get_string_from_bytes(&class.name.value);
+    let class_name = class.name.value.to_string();
 
     // get the parent if any
     if let Some(extends) = class.extends {
@@ -40,7 +39,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
         if parent_class.is_none() {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
-                message: format!("Class \"{}\" not found", get_string_from_bytes(parent_name)),
+                message: format!("Class \"{}\" not found", parent_name),
                 line: extends.parent.span.line,
             });
         }
