@@ -610,7 +610,10 @@ impl Evaluator {
 
                 Ok(PhpValue::Bool(left_object.instance_of(&right_object)))
             }
-            Expression::Reference(reference) => reference::expression(self, reference),
+            Expression::Reference(reference) => match reference::expression(self, reference) {
+                Ok(value) => Ok(value),
+                Err((error, _)) => Err(error),
+            },
             Expression::Parenthesized(parenthesized) => self.eval_expression(*parenthesized.expr),
             Expression::ErrorSuppress(error_expression) => {
                 let old_php_die = self.die;

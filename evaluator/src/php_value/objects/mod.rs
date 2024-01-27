@@ -1,32 +1,30 @@
-use std::{collections::HashMap, mem};
+pub mod class;
+
+use std::collections::HashMap;
 
 use php_parser_rs::{
     lexer::token::Span,
     parser::ast::{
-        arguments::ArgumentList,
         attributes::AttributeGroup,
-        data_type::Type,
-        functions::{MethodBody, ReturnType},
+        functions::ReturnType,
         identifiers::SimpleIdentifier,
-        modifiers::{
-            ClassModifierGroup, ConstantModifierGroup, MethodModifierGroup,
-            PromotedPropertyModifierGroup, PropertyModifierGroup, VisibilityModifier,
-        },
+        modifiers::{ClassModifierGroup, MethodModifierGroup, VisibilityModifier},
     },
 };
 
-use crate::{
-    evaluator::Evaluator,
-    helpers::{
-        extend_hashmap_without_overwrite, get_string_from_bytes,
-        visibility_modifier_to_method_modifier,
-    },
+use crate::helpers::{
+    extend_hashmap_without_overwrite, get_string_from_bytes, visibility_modifier_to_method_modifier,
+};
+
+use self::class::{
+    PhpClass, PhpObjectConcreteConstructor, PhpObjectConcreteMethod, PhpObjectConstant,
+    PhpObjectProperty,
 };
 
 use super::{
     error::{ErrorLevel, PhpError},
     macros::impl_utils_for_php_objects,
-    primitive_data_types::{PhpFunctionArgument, PhpValue},
+    primitive_data_types::PhpFunctionArgument,
 };
 
 impl_utils_for_php_objects!(PhpClass, PhpAbstractClass);
@@ -61,7 +59,7 @@ impl PhpObject {
         }
     }
 
-    pub fn get_name(&self) -> String {
+    pub fn get_name_as_string(&self) -> String {
         match self {
             PhpObject::Class(class) => class.name.to_string(),
             PhpObject::AbstractClass(class) => class.name.to_string(),
@@ -100,107 +98,14 @@ impl PhpObject {
             PhpObject::Trait(trait_) => trait_.name.span,
         }
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct PhpClass {
-    pub name: SimpleIdentifier,
-    pub modifiers: ClassModifierGroup,
-    pub attributes: Vec<AttributeGroup>,
-    pub parent: Option<Box<PhpObject>>,
-    pub properties: HashMap<Vec<u8>, PhpObjectProperty>,
-    pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
-    pub traits: Vec<PhpTrait>,
-    pub methods: HashMap<Vec<u8>, PhpObjectConcreteMethod>,
-    pub constructor: Option<PhpObjectConcreteConstructor>,
-}
-
-impl PhpClass {
-    /// This function is called when the class is instantiated.
-    pub fn call_constructor(
-        &mut self,
-        evaluator: &mut Evaluator,
-        _arguments: Option<ArgumentList>,
-    ) -> Result<(), PhpError> {
-        let Some(constructor) = self.constructor.as_mut() else {
-			return Ok(());
-		};
-
-        if !constructor.parameters.is_empty() {
-            let mut required_args = vec![];
-
-            for arg in &constructor.parameters {
-                required_args.push(arg);
-            }
-
-            todo!()
+    pub fn get_name_as_box(&self) -> Box<[u8]> {
+        match self {
+            PhpObject::Class(class) => class.name.value.bytes.clone().into_boxed_slice(),
+            PhpObject::AbstractClass(class) => class.name.value.bytes.clone().into_boxed_slice(),
+            PhpObject::Trait(trait_) => trait_.name.value.bytes.clone().into_boxed_slice(),
         }
-
-        let statements = mem::take(&mut constructor.body.statements);
-
-        for statement in statements {
-            evaluator.eval_statement(statement)?;
-        }
-
-        Ok(())
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct PhpObjectProperty {
-    pub modifiers: PropertyModifierGroup,
-    pub attributes: Vec<AttributeGroup>,
-    pub r#type: Option<Type>,
-    pub value: PhpValue,
-    pub initialized: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct PhpObjectConstant {
-    pub modifiers: ConstantModifierGroup,
-    pub attributes: Vec<AttributeGroup>,
-    pub value: PhpValue,
-}
-
-#[derive(Debug, Clone)]
-pub struct PhpObjectConcreteMethod {
-    pub attributes: Vec<AttributeGroup>,
-    pub modifiers: MethodModifierGroup,
-    pub return_by_reference: bool,
-	pub name_span: Span,
-    pub parameters: Vec<PhpFunctionArgument>,
-    pub return_type: Option<ReturnType>,
-    pub body: MethodBody,
-}
-
-#[derive(Debug, Clone)]
-pub struct PhpObjectConcreteConstructor {
-    pub attributes: Vec<AttributeGroup>,
-    pub modifiers: MethodModifierGroup,
-    pub return_by_reference: bool,
-    pub name: SimpleIdentifier,
-    pub parameters: Vec<ConstructorParameter>,
-    pub body: MethodBody,
-}
-
-#[derive(Debug, Clone)]
-pub enum ConstructorParameter {
-    PromotedProperty {
-        attributes: Vec<AttributeGroup>,
-        pass_by_reference: bool,
-        name: Vec<u8>,
-        data_type: Option<Type>,
-        default: Option<PhpValue>,
-        modifiers: PromotedPropertyModifierGroup,
-    },
-    Normal {
-        attributes: Vec<AttributeGroup>,
-        pass_by_reference: bool,
-        name: Vec<u8>,
-        data_type: Option<Type>,
-        ellipsis: bool,
-        default: Option<PhpValue>,
-    },
 }
 
 #[derive(Debug, Clone)]

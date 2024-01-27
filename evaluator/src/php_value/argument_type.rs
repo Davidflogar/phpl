@@ -2,14 +2,64 @@ use std::fmt::Display;
 
 use php_parser_rs::parser::ast::data_type::Type;
 
-use crate::scope::Scope;
+use crate::{helpers::get_string_from_bytes, scope::Scope};
 
 use super::{
     error::{ErrorLevel, PhpError},
     objects::PhpObject,
 };
 
+#[derive(Debug, Clone)]
+pub struct ObjectName {
+    pub parent: Option<Box<ObjectName>>,
+    pub name: Box<[u8]>,
+    pub name_line: usize,
+}
+
+impl ObjectName {
+    pub fn from_object(object: &PhpObject) -> Self {
+        if let Some(parent) = object.get_parent() {
+            return Self {
+                parent: Some(Box::new(Self::from_object(parent))),
+                name: object.get_name_as_box(),
+                name_line: object.get_name_span().line,
+            };
+        }
+
+        Self {
+            parent: None,
+            name: object.get_name_as_box(),
+            name_line: object.get_name_span().line,
+        }
+    }
+
+    pub fn eq(&self, other: &ObjectName) -> bool {
+        if self.name == other.name {
+            return true;
+        }
+
+        if let Some(parent) = &self.parent {
+            return parent.eq(other);
+        }
+
+        false
+    }
+
+    pub fn instance_of_object(&self, object: &PhpObject) -> bool {
+        if self.name == object.get_name_as_box() {
+            return true;
+        }
+
+        if let Some(parent) = object.get_parent() {
+            return self.instance_of_object(parent);
+        }
+
+        false
+    }
+}
+
 /// An enum that represents all data types that are valid to use as parameter in php.
+/// Or all data types that cannot be returned by a function.
 #[derive(Debug, Clone)]
 pub enum PhpArgumentType {
     Null,
@@ -31,7 +81,8 @@ pub enum PhpArgumentType {
     True,
     False,
     /// A named type, such as a class or trait.
-    Named(PhpObject),
+    /// It contains the name of the type as a byte vector.
+    Named(ObjectName),
 }
 
 impl PhpArgumentType {
@@ -41,7 +92,7 @@ impl PhpArgumentType {
     pub fn from_type(value: &Type, scope: &Scope) -> Result<Self, PhpError> {
         match value {
             Type::Named(span, name) => {
-                let Some(object) = scope.get_object(name) else {
+                let Some(object) = scope.get_object_by_ref(name) else {
 					return Err(PhpError {
 						level: ErrorLevel::Fatal,
 						message: format!("Undefined type {}", name),
@@ -49,7 +100,7 @@ impl PhpArgumentType {
 					})
 				};
 
-                Ok(PhpArgumentType::Named(object))
+                Ok(PhpArgumentType::Named(ObjectName::from_object(object)))
             }
             Type::Nullable(_, r#type) => Ok(PhpArgumentType::Nullable(Box::new(
                 PhpArgumentType::from_type(r#type, scope)?,
@@ -96,7 +147,7 @@ impl PhpArgumentType {
 impl Display for PhpArgumentType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PhpArgumentType::Named(inner) => write!(f, "{}", inner.get_name()),
+            PhpArgumentType::Named(inner) => write!(f, "{}", get_string_from_bytes(&inner.name)),
             PhpArgumentType::Nullable(inner) => write!(f, "?{}", inner),
             PhpArgumentType::Union(inner) => write!(
                 f,
@@ -156,7 +207,7 @@ impl PartialEq for PhpArgumentType {
             (PhpArgumentType::ParentReference, PhpArgumentType::ParentReference) => true,
             (PhpArgumentType::True, PhpArgumentType::True) => true,
             (PhpArgumentType::False, PhpArgumentType::False) => true,
-            (PhpArgumentType::Named(a), PhpArgumentType::Named(b)) => a.instance_of(b),
+            (PhpArgumentType::Named(a), PhpArgumentType::Named(b)) => a.eq(b),
             _ => false,
         }
     }

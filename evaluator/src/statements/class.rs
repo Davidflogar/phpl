@@ -8,8 +8,8 @@ use crate::{
     php_value::{
         error::{ErrorLevel, PhpError},
         objects::{
-            PhpAbstractClass, PhpClass, PhpObject, PhpObjectAbstractMethod,
-            PhpObjectConcreteConstructor, PhpObjectType, PhpTrait,
+            class::{PhpClass, PhpObjectConcreteConstructor},
+            PhpAbstractClass, PhpObject, PhpObjectAbstractMethod, PhpObjectType, PhpTrait,
         },
         primitive_data_types::PhpValue,
     },
@@ -34,7 +34,7 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
     if let Some(extends) = class.extends {
         let parent_name = &extends.parent.value;
 
-        let parent_class = evaluator.scope().get_object(parent_name);
+        let parent_class = evaluator.scope().get_object_cloned(parent_name);
 
         if parent_class.is_none() {
             return Err(PhpError {

@@ -8,7 +8,7 @@ use crate::{
     php_value::{
         error::PhpError,
         objects::{
-            PhpObject, PhpObjectAbstractMethod, PhpObjectConcreteConstructor, PhpObjectType,
+            class::PhpObjectConcreteConstructor, PhpObject, PhpObjectAbstractMethod, PhpObjectType,
             PhpTrait,
         },
         primitive_data_types::PhpValue,

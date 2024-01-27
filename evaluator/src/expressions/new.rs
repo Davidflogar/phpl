@@ -35,7 +35,7 @@ pub fn expression(
         target_name.extend(&name);
     }
 
-    let Some(object) = evaluator.scope().get_object(&target_name) else {
+    let Some(object) = evaluator.scope().get_object_cloned(&target_name) else {
 		return Err(PhpError{
 			level: ErrorLevel::Fatal,
 			message: format!("Class {} not found", get_string_from_bytes(&target_name)),
@@ -67,7 +67,7 @@ pub fn expression(
         }
     };
 
-    class.call_constructor(evaluator, expression.arguments)?;
+    class.call_constructor(evaluator, expression.arguments, expression.new)?;
 
     Ok(PhpValue::Object(PhpObject::Class(class)))
 }

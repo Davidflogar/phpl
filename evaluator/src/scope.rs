@@ -142,7 +142,11 @@ impl Scope {
         }
     }
 
-    pub fn get_object(&self, ident: &[u8]) -> Option<PhpObject> {
+    pub fn get_object_cloned(&self, ident: &[u8]) -> Option<PhpObject> {
         self.objects.get(ident).cloned()
+    }
+
+    pub fn get_object_by_ref(&self, ident: &[u8]) -> Option<&PhpObject> {
+        self.objects.get(ident)
     }
 }

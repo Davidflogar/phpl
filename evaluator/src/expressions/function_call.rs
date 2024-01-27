@@ -4,16 +4,12 @@ use std::{
     rc::Rc,
 };
 
-use php_parser_rs::{
-    lexer::token::Span,
-    parser::ast::{
-        arguments::Argument, identifiers::Identifier, Expression, FunctionCallExpression,
-        ReferenceExpression, Statement,
-    },
+use php_parser_rs::parser::ast::{
+    arguments::Argument, identifiers::Identifier, Expression, FunctionCallExpression, Statement,
 };
 
 use crate::{
-    errors::{only_arrays_and_traversables_can_be_unpacked, type_is_not_callable},
+    errors::{redefinition_of_parameter, too_few_arguments_to_function, type_is_not_callable},
     evaluator::Evaluator,
     helpers::get_string_from_bytes,
     php_value::{
@@ -22,8 +18,6 @@ use crate::{
     },
     scope::Scope,
 };
-
-use super::reference;
 
 pub fn expression(
     evaluator: &mut Evaluator,
@@ -98,9 +92,9 @@ pub fn expression(
 
     // prepare the needed vars
 
-    let mut final_function_parameters: HashMap<Vec<u8>, PhpValue> = HashMap::new();
+    let mut parameters_to_pass_to_the_function = HashMap::new();
 
-    let function_call_arguments = call.arguments.arguments.len();
+    let function_call_arguments_len = call.arguments.arguments.len();
 
     if !function_parameters.is_empty() {
         let function_parameters_len = function_parameters.len();
@@ -120,79 +114,48 @@ pub fn expression(
 
                     let function_arg = required_arguments.pop_front().unwrap();
 
-                    let argument_value = if function_arg.pass_by_reference {
-                        let unused_span = Span {
-                            line: 0,
-                            column: 0,
-                            position: 0,
-                        };
-
-                        let reference_expression = ReferenceExpression {
-                            ampersand: unused_span,
-                            right: Box::new(positional_argument.value),
-                        };
-
-                        let expression_result =
-                            reference::expression(evaluator, reference_expression);
-
-                        let Ok(result) = expression_result else {
-                            return Err(PhpError {
-                                level: ErrorLevel::Fatal,
-                                message: format!(
-									"{}(): Argument #{} ({}): could not be passed by reference",
-									target_name,
-									position + 1,
-									get_string_from_bytes(&function_arg.name.name),
-								),
-                                line: called_in_line,
-                            });
-                        };
-
-                        result
-                    } else {
-                        evaluator.eval_expression(positional_argument.value)?
-                    };
-
-                    if let Some(ellipsis) = positional_argument.ellipsis {
-                        if !argument_value.is_iterable() {
-                            return Err(only_arrays_and_traversables_can_be_unpacked(
-                                ellipsis.line,
-                            ));
-                        }
-
-                        todo!()
-                    }
-
-                    if function_arg.is_variadic {
-                        todo!()
+                    if parameters_to_pass_to_the_function.contains_key(&function_arg.name.bytes) {
+                        return Err(redefinition_of_parameter(
+                            &function_arg.name,
+                            called_in_line,
+                        ));
                     }
 
                     // validate the argument
-                    let is_not_valid = function_arg.is_valid(&argument_value, called_in_line);
+                    let validation_result = function_arg
+                        .must_be_valid(evaluator, Argument::Positional(positional_argument));
 
-                    if let Err(mut error) = is_not_valid {
-                        error.message = format!(
-                            "{}(): Argument #{} ({}): {}",
-                            target_name,
-                            position + 1,
-                            get_string_from_bytes(&function_arg.name.name),
-                            error.message
-                        );
+                    if let Err((error, error_string)) = validation_result {
+                        if let None = error {
+                            let error = PhpError {
+                                level: ErrorLevel::Fatal,
+                                message: format!(
+                                    "{}(): Argument #{} ({}): {}",
+                                    target_name,
+                                    position + 1,
+                                    get_string_from_bytes(&function_arg.name),
+                                    error_string
+                                ),
+                                line: called_in_line,
+                            };
 
-                        return Err(error);
+                            return Err(error);
+                        }
+
+                        return Err(error.unwrap());
                     }
 
-                    final_function_parameters
-                        .insert(function_arg.name.name.to_vec(), argument_value);
+                    parameters_to_pass_to_the_function
+                        .insert(function_arg.name.to_vec(), validation_result.unwrap());
                 }
                 Argument::Named(named_argument) => {
-                    let mut argument_name = named_argument.name.value;
+                    let mut argument_name = named_argument.name.value.clone();
 
                     // add the $ at the beginning
                     // since the arguments inside required_arguments are saved with the $ at the beginning
                     argument_name.bytes.insert(0, b'$');
 
-                    if final_function_parameters.contains_key(&argument_name.bytes) {
+                    if parameters_to_pass_to_the_function.contains_key(&argument_name.bytes) {
                         return Err(PhpError {
                             level: ErrorLevel::Fatal,
                             message: format!(
@@ -205,7 +168,7 @@ pub fn expression(
 
                     let argument_position_some = required_arguments
                         .iter()
-                        .position(|c| c.name.name == argument_name);
+                        .position(|c| c.name == argument_name);
 
                     let Some(argument_position) = argument_position_some else {
 						return Err(PhpError {
@@ -221,71 +184,31 @@ pub fn expression(
                     let function_arg = required_arguments.remove(argument_position).unwrap();
 
                     // from here it is basically the same as working with a positional argument.
+                    let validation_result =
+                        function_arg.must_be_valid(evaluator, Argument::Named(named_argument));
 
-                    let argument_value = if function_arg.pass_by_reference {
-                        let unused_span = Span {
-                            line: 0,
-                            column: 0,
-                            position: 0,
-                        };
-
-                        let reference_expression = ReferenceExpression {
-                            ampersand: unused_span,
-                            right: Box::new(named_argument.value),
-                        };
-
-                        let expression_result =
-                            reference::expression(evaluator, reference_expression);
-
-                        let Ok(result) = expression_result else {
-                            return Err(PhpError {
+                    if let Err((error, error_string)) = validation_result {
+                        if let None = error {
+                            let error = PhpError {
                                 level: ErrorLevel::Fatal,
                                 message: format!(
-									"{}(): Argument #{} ({}): could not be passed by reference",
-									target_name,
-									position + 1,
-									get_string_from_bytes(&function_arg.name.name),
-								),
+                                    "{}(): Argument #{} ({}): {}",
+                                    target_name,
+                                    position + 1,
+                                    get_string_from_bytes(&function_arg.name),
+                                    error_string
+                                ),
                                 line: called_in_line,
-                            });
-                        };
+                            };
 
-                        result
-                    } else {
-                        evaluator.eval_expression(named_argument.value)?
-                    };
-
-                    if let Some(ellipsis) = named_argument.ellipsis {
-                        if !argument_value.is_iterable() {
-                            return Err(only_arrays_and_traversables_can_be_unpacked(
-                                ellipsis.line,
-                            ));
+                            return Err(error);
                         }
 
-                        todo!()
+                        return Err(error.unwrap());
                     }
 
-                    if function_arg.is_variadic {
-                        todo!()
-                    }
-
-                    // validate the argument
-                    let is_not_valid = function_arg.is_valid(&argument_value, called_in_line);
-
-                    if let Err(mut error) = is_not_valid {
-                        error.message = format!(
-                            "{}(): Argument #{} ({}): {}",
-                            target_name,
-                            position + 1,
-                            get_string_from_bytes(&function_arg.name.name),
-                            error.message
-                        );
-
-                        return Err(error);
-                    }
-
-                    final_function_parameters
-                        .insert(function_arg.name.name.to_vec(), argument_value);
+                    parameters_to_pass_to_the_function
+                        .insert(function_arg.name.to_vec(), validation_result.unwrap());
                 }
             }
         }
@@ -294,19 +217,15 @@ pub fn expression(
 
         for required_arg in required_arguments {
             let Some(default_value) = required_arg.default_value else {
-                return Err(PhpError {
-                    level: ErrorLevel::Fatal,
-                    message: format!(
-                        "Too few arguments to function {}(), {} passed and exactly {} was expected",
-                        target_name,
-                        function_call_arguments,
-                        required_arguments_len + 1
-                    ),
-                    line: called_in_line,
-                });
+                return Err(too_few_arguments_to_function(
+					target_name,
+					function_call_arguments_len,
+					required_arguments_len,
+					call.arguments.right_parenthesis.line
+				));
             };
 
-            final_function_parameters.insert(required_arg.name.name.to_vec(), default_value);
+            parameters_to_pass_to_the_function.insert(required_arg.name.to_vec(), default_value);
         }
     }
 
@@ -316,26 +235,27 @@ pub fn expression(
 
     evaluator.change_scope(Rc::new(RefCell::new(new_scope)));
 
-    for new_var in final_function_parameters {
+    for new_var in parameters_to_pass_to_the_function {
         evaluator.scope().set_var_value(&new_var.0, new_var.1);
     }
 
-    // execute the function
-    let mut result = Ok(PhpValue::Null);
+    let mut error = None;
 
+    // execute the function
     for statement in function_body {
-        result = evaluator.eval_statement(statement);
+        if let Err(err) = evaluator.eval_statement(statement) {
+            error = Some(err);
+            break;
+        }
     }
 
     // change to the old environment
-
     evaluator.change_scope(old_scope);
 
-    if let Err(mut err) = result {
-        err.line = called_in_line;
-
+    if let Some(err) = error {
         return Err(err);
     }
 
-    result
+    // TODO: return a value from the function
+    Ok(PhpValue::Null)
 }

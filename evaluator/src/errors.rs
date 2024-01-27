@@ -9,22 +9,20 @@ use crate::{
     },
 };
 
-pub fn expected_type_but_got(r#type: &str, given: String, line: usize) -> PhpError {
+pub fn expected_type_but_got(expected_type: &str, given: String, line: usize) -> PhpError {
     PhpError {
         level: ErrorLevel::Fatal,
-        message: format!("Expected type '{}', '{}' given", r#type, given,),
+        message: format!("Expected type '{}', '{}' given", expected_type, given,),
         line,
     }
 }
 
 /// Returns an error when a type cannot be used as a default value for a property of a given type.
-///
-/// Note that the message is different for nullable types.
 pub fn cannot_use_type_as_default_value_for_property_of_type(
     bad_type: String,
     class_name: &str,
     property_name: &str,
-    expected_type: &str,
+    expected_type: String,
     line: usize,
 ) -> PhpError {
     if bad_type == NULL {
@@ -176,6 +174,24 @@ pub fn type_is_not_callable(ty: String, line: usize) -> PhpError {
     PhpError {
         level: ErrorLevel::Fatal,
         message: format!("Type {} is not callable", ty),
+        line,
+    }
+}
+
+pub fn too_few_arguments_to_function(
+    function_name: String,
+    passed: usize,
+    require: usize,
+    line: usize,
+) -> PhpError {
+    PhpError {
+        level: ErrorLevel::Fatal,
+        message: format!(
+            "Too few arguments to function {}(), {} passed and exactly {} was expected",
+            function_name,
+            passed,
+            require
+        ),
         line,
     }
 }

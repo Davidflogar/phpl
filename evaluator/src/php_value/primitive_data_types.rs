@@ -5,16 +5,24 @@ use std::fmt::Debug;
 use std::ops::{Add, BitAnd, BitOr, BitXor, Div, Mul, Not, Rem, Shl, Shr, Sub};
 use std::rc::Rc;
 
+use php_parser_rs::lexer::byte_string::ByteString;
+use php_parser_rs::lexer::token::Span;
+use php_parser_rs::parser::ast::arguments::Argument;
 use php_parser_rs::parser::ast::attributes::AttributeGroup;
 use php_parser_rs::parser::ast::functions::ReturnType;
-use php_parser_rs::parser::ast::variables::SimpleVariable;
-use php_parser_rs::parser::ast::Statement;
+use php_parser_rs::parser::ast::{Expression, ReferenceExpression, Statement};
 
-use crate::helpers::callable::php_value_matches_type;
+use crate::errors::{expected_type_but_got, only_arrays_and_traversables_can_be_unpacked};
+use crate::evaluator::Evaluator;
+use crate::expressions::reference;
+use crate::helpers::php_value_matches_argument_type;
 
 use super::argument_type::PhpArgumentType;
 use super::error::{ErrorLevel, PhpError};
+use super::macros::impl_validate_argument_for_struct;
 use super::objects::PhpObject;
+
+impl_validate_argument_for_struct!(PhpFunctionArgument);
 
 pub const NULL: &str = "null";
 pub const BOOL: &str = "bool";
@@ -56,7 +64,7 @@ pub struct PhpCallable {
 
 #[derive(Debug, Clone)]
 pub struct PhpFunctionArgument {
-    pub name: SimpleVariable,
+    pub name: ByteString,
     pub data_type: Option<PhpArgumentType>,
     pub default_value: Option<PhpValue>,
     pub is_variadic: bool,
@@ -65,7 +73,7 @@ pub struct PhpFunctionArgument {
 
 impl PartialEq for PhpFunctionArgument {
     fn eq(&self, other: &Self) -> bool {
-        if self.name.name != other.name.name {
+        if self.name != other.name {
             return false;
         }
 
@@ -530,19 +538,6 @@ impl From<String> for PhpError {
             message,
             line: 0,
         }
-    }
-}
-
-impl PhpFunctionArgument {
-    /// Check that `arg` is valid for this argument.
-    pub fn is_valid(&self, arg: &PhpValue, throw_error_in_line: usize) -> Result<(), PhpError> {
-        let self_has_type = &self.data_type;
-
-        if let Some(ref self_type) = self_has_type {
-            return php_value_matches_type(self_type, arg, throw_error_in_line);
-        }
-
-        Ok(())
     }
 }
 

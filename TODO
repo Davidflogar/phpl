@@ -6,3 +6,4 @@
 - Only the last parameter can be variadic in all functions (from the parser)
 - Avoid repeated argument names in functions and constructors
 - Make it possible to perform only arithmetic operations on the appropriate data types and not attempt to convert data types.
+- Add stack trace for exceptions

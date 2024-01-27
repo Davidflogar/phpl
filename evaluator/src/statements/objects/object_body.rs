@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use php_parser_rs::parser::ast::{
     constant::ClassishConstant,
@@ -12,20 +12,23 @@ use crate::{
     errors::{
         abstract_method_has_not_been_applied_because_of_collision, cannot_redeclare_method,
         cannot_redeclare_property, cannot_use_default_value_for_parameter,
-        method_has_not_been_applied_because_of_collision,
+        method_has_not_been_applied_because_of_collision, redefinition_of_parameter,
     },
     evaluator::Evaluator,
     helpers::{
-        callable::{eval_function_parameter_list, php_value_matches_type},
-        get_string_from_bytes,
-        object::property_has_valid_default_value,
+        callable::eval_function_parameter_list, get_string_from_bytes,
+        object::property_has_valid_default_value, php_value_matches_argument_type,
     },
     php_value::{
         argument_type::PhpArgumentType,
         error::{ErrorLevel, PhpError},
         objects::{
-            ConstructorParameter, PhpObject, PhpObjectAbstractMethod, PhpObjectConcreteConstructor,
-            PhpObjectConcreteMethod, PhpObjectConstant, PhpObjectProperty, PhpTrait,
+            class::{
+                ConstructorNormalParameter, ConstructorParameter, ConstructorPromotedProperty,
+                PhpObjectConcreteConstructor, PhpObjectConcreteMethod, PhpObjectConstant,
+                PhpObjectProperty,
+            },
+            PhpObject, PhpObjectAbstractMethod, PhpTrait,
         },
         primitive_data_types::PhpValue,
     },
@@ -78,6 +81,12 @@ pub fn property(
         let modifiers = property.modifiers.clone();
         let r#type = property.r#type.clone();
 
+        let php_argument_type = if let Some(ty) = r#type {
+            Some(PhpArgumentType::from_type(&ty, &evaluator.scope())?)
+        } else {
+            None
+        };
+
         match entry {
             PropertyEntry::Initialized {
                 variable,
@@ -95,7 +104,7 @@ pub fn property(
                 let expr_value = evaluator.eval_expression(value)?;
 
                 property_has_valid_default_value(
-                    r#type.as_ref(),
+                    php_argument_type.as_ref(),
                     &expr_value,
                     equals.line,
                     class_name,
@@ -105,8 +114,8 @@ pub fn property(
                 let property = PhpObjectProperty {
                     attributes,
                     modifiers,
-                    r#type,
-                    value: expr_value,
+                    r#type: php_argument_type,
+                    value: Rc::new(RefCell::new(expr_value)),
                     initialized: true,
                 };
 
@@ -124,8 +133,8 @@ pub fn property(
                 let property = PhpObjectProperty {
                     attributes,
                     modifiers,
-                    r#type,
-                    value: PhpValue::Null,
+                    r#type: php_argument_type,
+                    value: Rc::new(RefCell::new(PhpValue::Null)),
                     initialized: false,
                 };
 
@@ -234,7 +243,7 @@ pub fn concrete_method(
             attributes: method.attributes,
             modifiers: method.modifiers,
             return_by_reference: method.ampersand.is_some(),
-			name_span: method.name.span,
+            name_span: method.name.span,
             parameters: method_args,
             return_type: method.return_type,
             body: method.body,
@@ -251,6 +260,7 @@ pub fn concrete_constructor(
     class_constructor: Option<PhpObjectConcreteConstructor>,
     properties: &mut HashMap<Vec<u8>, PhpObjectProperty>,
 ) -> Result<PhpObjectConcreteConstructor, PhpError> {
+
     if class_constructor.is_some() {
         return Err(cannot_redeclare_method(
             class_name,
@@ -259,23 +269,33 @@ pub fn concrete_constructor(
         ));
     }
 
-    let mut args = vec![];
+    let mut args: Vec<ConstructorParameter> = vec![];
 
     for param in constructor.parameters.parameters {
         let default_value_expression = param.default;
         let data_type = param.data_type.clone();
         let mut default_value = None;
 
+        // check if the argument has already been declared
+        for arg in &args {
+            if arg.get_name_as_bytes() == param.name.name.bytes {
+                return Err(redefinition_of_parameter(
+                    &param.name.name,
+                    param.name.span.line,
+                ));
+            }
+        }
+
         if let (Some(default), Some(r#type)) = (default_value_expression, data_type) {
             let php_value = evaluator.eval_expression(default)?;
 
-            let err = php_value_matches_type(
+            let matches = php_value_matches_argument_type(
                 &PhpArgumentType::from_type(&r#type, &evaluator.scope())?,
                 &php_value,
                 param.name.span.line,
             );
 
-            if err.is_err() {
+            if matches.is_err() {
                 return Err(cannot_use_default_value_for_parameter(
                     php_value.get_type_as_string(),
                     param.name.name.to_string(),
@@ -298,23 +318,38 @@ pub fn concrete_constructor(
                 ));
             }
 
-            args.push(ConstructorParameter::PromotedProperty {
-                attributes: param.attributes,
-                pass_by_reference: param.ampersand.is_some(),
-                name: param.name.name.bytes,
-                data_type: param.data_type,
-                default: default_value,
-                modifiers: param.modifiers,
-            });
+            let data_type = if let Some(r#type) = param.data_type {
+                Some(PhpArgumentType::from_type(&r#type, &evaluator.scope())?)
+            } else {
+                None
+            };
+
+            args.push(ConstructorParameter::PromotedProperty(
+                ConstructorPromotedProperty {
+                    attributes: param.attributes,
+                    pass_by_reference: param.ampersand.is_some(),
+                    name: param.name.name.bytes,
+                    data_type,
+                    default: default_value,
+                    modifiers: param.modifiers,
+                    is_variadic: false,
+                },
+            ));
         } else {
-            args.push(ConstructorParameter::Normal {
+            let data_type = if let Some(r#type) = param.data_type {
+                Some(PhpArgumentType::from_type(&r#type, &evaluator.scope())?)
+            } else {
+                None
+            };
+
+            args.push(ConstructorParameter::Normal(ConstructorNormalParameter {
                 attributes: param.attributes,
                 pass_by_reference: param.ampersand.is_some(),
                 name: param.name.name.bytes,
-                data_type: param.data_type,
+                data_type,
                 default: default_value,
-                ellipsis: param.ellipsis.is_some(),
-            });
+                is_variadic: param.ellipsis.is_some(),
+            }));
         }
     }
 
@@ -341,7 +376,7 @@ pub fn trait_usage(
             continue;
         }
 
-        let object_option = evaluator.scope().get_object(&trait_name);
+        let object_option = evaluator.scope().get_object_cloned(&trait_name);
 
         let Some(object) = object_option else {
             return Err(PhpError {
@@ -554,7 +589,7 @@ pub fn trait_usage(
         for (method_name, method) in &trait_object.concrete_methods {
             if let Some(method) = concrete_methods_seen
                 .iter()
-                .find(|(name, _, _)| name == method_name)
+                .find(|(name, _, _)| *name == method_name)
             {
                 let error = method_has_not_been_applied_because_of_collision(
                     method_name,

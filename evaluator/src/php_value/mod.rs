@@ -80,7 +80,7 @@ mod macros {
 													"{}{}{}",
 													data_type_as_string,
 													if parameter.is_variadic {"..."} else {""},
-													get_string_from_bytes(&parameter.name.name),
+													get_string_from_bytes(&parameter.name),
 												)
 											};
 
@@ -143,7 +143,7 @@ mod macros {
 
 					/// Checks if the given object is an instance of the current object.
 					pub fn instance_of(&self, object: &PhpObject) -> bool {
-						if object.get_name() == self.name.to_string() {
+						if object.get_name_as_string() == self.name.to_string() {
 							return true;
 						}
 
@@ -159,4 +159,117 @@ mod macros {
 	}
 
     pub(crate) use impl_utils_for_php_objects;
+
+    macro_rules! impl_validate_argument_for_struct{
+		($($name:ident),*) => {
+			$(
+				impl $name {
+					/// Check that `other` is valid for this argument.
+					///
+					/// It it doesn't, it will return a tuple,
+					/// the first value being an error that is caused during the execution of the argument value,
+					/// and the second value being a string that indicates the validation error of the argument.
+					pub fn must_be_valid(
+						&self,
+						evaluator: &mut Evaluator,
+						argument_type: Argument,
+					) -> Result<PhpValue, (Option<PhpError>, String)> {
+						struct ArgumentRepresentation {
+							ellipsis: Option<Span>,
+							value: Expression,
+						}
+
+						let argument = match argument_type {
+							Argument::Named(arg) => {
+								ArgumentRepresentation {
+									ellipsis: arg.ellipsis,
+									value: arg.value,
+								}
+							}
+							Argument::Positional(arg) => {
+								ArgumentRepresentation {
+									ellipsis: arg.ellipsis,
+									value: arg.value,
+								}
+							}
+						};
+
+						// get the value of the argument
+						let argument_value = if self.pass_by_reference {
+							let unused_span = Span {
+								line: 0,
+								column: 0,
+								position: 0,
+							};
+
+							let reference_expression = ReferenceExpression {
+								ampersand: unused_span,
+								right: Box::new(argument.value),
+							};
+
+							let expression_result = reference::expression(evaluator, reference_expression);
+
+							let Ok(result) = expression_result else {
+								let (php_error, because_bad_expression) = expression_result.unwrap_err();
+
+								if because_bad_expression {
+									return Err((None, "could not be passed by reference".to_string()));
+								}
+
+								return Err((Some(php_error), "".to_string()))
+							};
+
+							result
+						} else {
+							let result = evaluator.eval_expression(argument.value);
+
+							match result {
+								Ok(result) => result,
+								Err(php_error) => return Err((Some(php_error), "".to_string())),
+							}
+						};
+
+						// validate the argument
+
+						let self_has_type = &self.data_type;
+
+						if let Some(ref self_type) = self_has_type {
+							let matches = php_value_matches_argument_type(self_type, &argument_value, 0);
+
+							if let Err(expected_type) = matches {
+								return Err((
+									None,
+									expected_type_but_got(
+										&expected_type,
+										argument_value.get_type_as_string(),
+										0,
+									)
+									.message,
+								));
+							}
+						}
+
+						if let Some(ellipsis) = argument.ellipsis {
+							if !argument_value.is_iterable() {
+								return Err((
+									None,
+									only_arrays_and_traversables_can_be_unpacked(ellipsis.line).message,
+								));
+							}
+
+							todo!()
+						}
+
+						if self.is_variadic {
+							todo!()
+						}
+
+						Ok(argument_value)
+					}
+				}
+			)*
+		};
+	}
+
+    pub(crate) use impl_validate_argument_for_struct;
 }
