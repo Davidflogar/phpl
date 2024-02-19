@@ -1,6 +1,6 @@
 use crate::{
     errors::cannot_use_type_as_default_value_for_property_of_type,
-    php_value::{argument_type::PhpArgumentType, error::PhpError, primitive_data_types::PhpValue},
+    php_data_types::{argument_type::PhpArgumentType, error::PhpError, primitive_data_types::PhpValue},
 };
 
 use super::php_value_matches_argument_type;

@@ -2,7 +2,7 @@ use php_parser_rs::parser::ast::{Expression, ReferenceExpression};
 
 use crate::{
     evaluator::Evaluator,
-    php_value::{
+    php_data_types::{
         error::{ErrorLevel, PhpError},
         primitive_data_types::PhpValue,
     },

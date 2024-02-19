@@ -19,7 +19,7 @@ use crate::{
         callable::eval_function_parameter_list, get_string_from_bytes,
         object::property_has_valid_default_value, php_value_matches_argument_type,
     },
-    php_value::{
+    php_data_types::{
         argument_type::PhpArgumentType,
         error::{ErrorLevel, PhpError},
         objects::{

@@ -2,7 +2,7 @@ use php_parser_rs::lexer::byte_string::ByteString;
 
 use crate::{
     helpers::get_string_from_bytes,
-    php_value::{
+    php_data_types::{
         error::{ErrorLevel, PhpError},
         objects::PhpObjectType,
         primitive_data_types::NULL,

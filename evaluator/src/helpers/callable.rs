@@ -3,7 +3,7 @@ use php_parser_rs::parser::ast::functions::FunctionParameterList;
 use crate::{
     errors::{self, cannot_use_default_value_for_parameter},
     evaluator::Evaluator,
-    php_value::{
+    php_data_types::{
         argument_type::PhpArgumentType, error::PhpError, primitive_data_types::PhpFunctionArgument,
     },
 };

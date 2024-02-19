@@ -3,7 +3,7 @@
 
 use php_parser_rs::lexer::token::Span;
 
-use crate::php_value::error::{ErrorLevel, PhpError};
+use crate::php_data_types::error::{ErrorLevel, PhpError};
 
 pub fn string_conversion_failed(ty: String, span: Span) -> PhpError {
     PhpError {

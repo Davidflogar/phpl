@@ -5,7 +5,7 @@ use php_parser_rs::lexer::token::Span;
 use crate::{
     errors::cannot_redeclare_object,
     helpers::get_string_from_bytes,
-    php_value::{
+    php_data_types::{
         error::{ErrorLevel, PhpError},
         objects::{PhpObject, PhpObjectType},
         primitive_data_types::{PhpIdentifier, PhpValue},
@@ -83,6 +83,11 @@ impl Scope {
         }
 
         let reference = self.vars.get(to).unwrap();
+
+		// If the value is a reference, return the reference.
+		if let PhpValue::Reference(ref_value) = &*reference.borrow() {
+			return Rc::clone(ref_value);
+		}
 
         Rc::clone(reference)
     }

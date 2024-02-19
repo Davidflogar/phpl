@@ -29,7 +29,7 @@ use crate::{
     evaluator::Evaluator,
     expressions::reference,
     helpers::{get_string_from_bytes, php_value_matches_argument_type},
-    php_value::{
+    php_data_types::{
         argument_type::PhpArgumentType,
         error::{ErrorLevel, PhpError},
         macros::impl_validate_argument_for_struct,
@@ -112,7 +112,7 @@ impl ConstructorParameter {
         }
     }
 
-    pub fn get_name_as_bytes<'a>(&'a self) -> &'a [u8] {
+    pub fn get_name_as_bytes(&self) -> &[u8] {
         match self {
             ConstructorParameter::Normal(param) => &param.name,
             ConstructorParameter::PromotedProperty(param) => &param.name,
@@ -199,7 +199,7 @@ impl PhpClass {
                             .must_be_valid(evaluator, Argument::Positional(positional_argument));
 
                         if let Err((error, error_string)) = validation_result {
-                            if let None = error {
+                            if error.is_none() {
                                 let error = PhpError {
                                     level: ErrorLevel::Fatal,
                                     message: format!(
@@ -264,7 +264,7 @@ impl PhpClass {
                             .must_be_valid(evaluator, Argument::Named(named_argument));
 
                         if let Err((error, error_string)) = validation_result {
-                            if let None = error {
+                            if error.is_none() {
                                 let error = PhpError {
                                     level: ErrorLevel::Fatal,
                                     message: format!(

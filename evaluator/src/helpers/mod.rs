@@ -13,7 +13,7 @@ use php_parser_rs::{
 
 use crate::{
     evaluator::Evaluator,
-    php_value::{
+    php_data_types::{
         argument_type::PhpArgumentType,
         error::{ErrorLevel, PhpError},
         primitive_data_types::PhpValue,
@@ -22,6 +22,7 @@ use crate::{
 
 pub mod callable;
 pub mod object;
+pub mod function_call;
 
 pub fn get_span_from_var(var: &Variable) -> Span {
     match var {
@@ -100,7 +101,7 @@ pub fn visibility_modifier_to_method_modifier(visibility: &VisibilityModifier) -
 pub fn php_value_matches_argument_type(
     r#type: &PhpArgumentType,
     php_value: &PhpValue,
-    line: usize,
+    _line: usize,
 ) -> Result<(), String> {
     match r#type {
         PhpArgumentType::Nullable(r#type) => {
@@ -108,12 +109,12 @@ pub fn php_value_matches_argument_type(
                 return Ok(());
             }
 
-            php_value_matches_argument_type(r#type, php_value, line)
+            php_value_matches_argument_type(r#type, php_value, _line)
         }
         PhpArgumentType::Union(types) => {
             let matches_any = types
                 .iter()
-                .any(|ty| php_value_matches_argument_type(ty, php_value, line).is_ok());
+                .any(|ty| php_value_matches_argument_type(ty, php_value, _line).is_ok());
 
             if !matches_any {
                 return Err(types
@@ -127,7 +128,7 @@ pub fn php_value_matches_argument_type(
         }
         PhpArgumentType::Intersection(types) => {
             for ty in types {
-                if php_value_matches_argument_type(ty, php_value, line).is_err() {
+                if php_value_matches_argument_type(ty, php_value, _line).is_err() {
                     return Err(types
                         .iter()
                         .map(|ty| ty.to_string())

@@ -5,7 +5,7 @@ use php_parser_rs::parser::ast::traits::{TraitMember, TraitStatement};
 use crate::{
     errors::cannot_redeclare_object,
     evaluator::Evaluator,
-    php_value::{
+    php_data_types::{
         error::PhpError,
         objects::{
             class::PhpObjectConcreteConstructor, PhpObject, PhpObjectAbstractMethod, PhpObjectType,

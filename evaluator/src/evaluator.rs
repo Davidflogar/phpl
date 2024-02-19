@@ -16,14 +16,14 @@ use php_parser_rs::{
     },
 };
 
-use crate::expressions::{function_call, new, reference};
+use crate::expressions::{function_call, method_call, new, reference};
 use crate::helpers::callable::eval_function_parameter_list;
 use crate::helpers::{get_string_from_bytes, parse_php_file};
-use crate::php_value::error::{ErrorLevel, PhpError};
-use crate::php_value::primitive_data_types::{PhpCallable, PhpIdentifier};
+use crate::php_data_types::error::{ErrorLevel, PhpError};
+use crate::php_data_types::primitive_data_types::{PhpCallable, PhpIdentifier, PhpValue};
 use crate::statements::{class, traits};
 use crate::warnings;
-use crate::{helpers::get_span_from_var, php_value::primitive_data_types::PhpValue, scope::Scope};
+use crate::{helpers::get_span_from_var, scope::Scope};
 
 const NULL: PhpValue = PhpValue::Null;
 
@@ -46,20 +46,20 @@ pub struct Evaluator {
 }
 
 impl Evaluator {
-    pub fn new(env: Rc<RefCell<Scope>>) -> Evaluator {
+    pub fn new(scope: Rc<RefCell<Scope>>) -> Evaluator {
         Evaluator {
             output: String::new(),
             php_open: false,
             die: false,
-            scope: env,
+            scope: scope,
             warnings: vec![],
             included_files: vec![],
             required_files: vec![],
         }
     }
 
-    pub fn change_scope(&mut self, env: Rc<RefCell<Scope>>) {
-        self.scope = env;
+    pub fn change_scope(&mut self, scope: Rc<RefCell<Scope>>) {
+        self.scope = scope;
     }
 
     /// Appends the given output to the current evaluator's output.
@@ -146,7 +146,7 @@ impl Evaluator {
         match expr {
             Expression::Eval(_) => todo!(),
             Expression::Empty(ee) => {
-                let arg = ee.argument.argument.clone();
+                let arg = ee.argument.argument;
 
                 let arg_as_php_value = self.eval_expression(arg.value)?;
 
@@ -200,7 +200,7 @@ impl Evaluator {
             }
             Expression::Print(pe) => {
                 if pe.value.is_some() {
-                    let expr = *pe.value.clone().unwrap();
+                    let expr = *pe.value.unwrap();
 
                     let value = self.eval_expression(expr)?;
 
@@ -217,7 +217,7 @@ impl Evaluator {
 
                     self.add_output(value_as_string.unwrap().as_str());
                 } else if pe.argument.is_some() {
-                    let arg = *pe.argument.clone().unwrap();
+                    let arg = *pe.argument.unwrap();
 
                     let value = self.eval_expression(arg.argument.value)?;
 
@@ -623,7 +623,7 @@ impl Evaluator {
 
                 if old_php_die != self.die || old_warnings.len() != self.warnings.len() {
                     self.die = old_php_die;
-                    self.warnings = old_warnings.to_vec();
+                    self.warnings = old_warnings;
                 }
 
                 Ok(NULL)
@@ -644,6 +644,7 @@ impl Evaluator {
             }
             Expression::FunctionCall(call) => function_call::expression(self, call),
             Expression::FunctionClosureCreation(_) => todo!(),
+            Expression::MethodCall(call) => method_call::expression(self, call),
             Expression::New(new) => new::expression(self, new),
             Expression::Bool(b) => Ok(PhpValue::Bool(b.value)),
             _ => Ok(NULL),
@@ -678,7 +679,7 @@ impl Evaluator {
 
     pub fn get_variable_name(&mut self, variable: Variable) -> Result<Vec<u8>, PhpError> {
         match variable {
-            Variable::SimpleVariable(sv) => Ok(sv.name.bytes.clone()),
+            Variable::SimpleVariable(sv) => Ok(sv.name.bytes),
             Variable::VariableVariable(vv) => {
                 let value = self.get_variable_value(*vv.variable)?;
 
