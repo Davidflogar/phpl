@@ -1,6 +1,8 @@
 use crate::{
     errors::cannot_use_type_as_default_value_for_property_of_type,
-    php_data_types::{argument_type::PhpArgumentType, error::PhpError, primitive_data_types::PhpValue},
+    php_data_types::{
+        argument_type::PhpArgumentType, error::PhpError, primitive_data_types::PhpValue,
+    },
 };
 
 use super::php_value_matches_argument_type;
@@ -13,8 +15,8 @@ pub fn property_has_valid_default_value(
     property_name: &str,
 ) -> Result<(), PhpError> {
     let Some(r#type) = r#type else {
-		return Ok(());
-	};
+        return Ok(());
+    };
 
     let matches = php_value_matches_argument_type(r#type, php_value, line);
 

@@ -142,7 +142,7 @@ To use this project, follow these steps:
     // $b is null
     ```
 
-2. When instantiating a class in phpl, after executing the constructor, the constructor is deleted, although the function still exists, the body will be empty
+2. When instantiating a class in phpl, after executing the constructor, the constructor is deleted, although the function still exists, the body will be empty.
 
 3. PHPL will not attempt to convert a parameter to the correct data type when passed to a function. For example: if a function receives an integer, the data type of the passed parameter must be an integer and no attempt will be made to convert the parameter to an integer. That's how it is with all data types.
 
@@ -154,5 +154,15 @@ To use this project, follow these steps:
 		}
     }
     ```
+
+5. A boolean value that is `false` in string will be represented as `0` and not as an empty string. Similarly, a `null` value as a string will be the text `null`.
+
+6. A string that contains only a `0` will not be considered empty by the `empty` function.
+
+7. When creating a reference to a value, the referenced value will also become a reference. Example:
+	```php
+	$a = 1;
+	$b = &$a; // here assign $b a reference to $a internally mark $a as reference
+	```
 
 There are still some undocumented differences, so this list will expand over time.

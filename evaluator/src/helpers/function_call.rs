@@ -7,7 +7,7 @@ use std::{
 use php_parser_rs::parser::ast::{arguments::Argument, Statement};
 
 use crate::{
-    errors::{redefinition_of_parameter, too_few_arguments_to_function},
+    errors::too_few_arguments_to_function,
     evaluator::Evaluator,
     helpers::get_string_from_bytes,
     php_data_types::{
@@ -17,28 +17,32 @@ use crate::{
     scope::Scope,
 };
 
+use super::string_as_number;
+
 pub fn generic_function_call(
     evaluator: &mut Evaluator,
     target_name: String,
-    function_arguments: &Vec<PhpFunctionArgument>,
+    function_arguments: &[PhpFunctionArgument],
     function_call_arguments: Vec<Argument>,
     called_in_line: usize,
     function_body: Vec<Statement>,
 ) -> Result<PhpValue, PhpError> {
-    // prepare the needed vars
-    let mut parameters_to_pass_to_the_function = HashMap::new();
+    let mut parameters_to_pass_to_the_function: HashMap<u64, PhpValue> = HashMap::new();
 
     let function_call_arguments_len = function_call_arguments.len();
 
     if !function_arguments.is_empty() {
         let function_parameters_len = function_arguments.len();
 
-        // get the arguments that are required by the function,
-        // even if they have a default value
-        let mut required_arguments = VecDeque::new();
+        let mut function_arguments_clone = VecDeque::new();
+        let mut required_arguments_len = 0;
 
         for arg in function_arguments {
-            required_arguments.push_back(arg);
+            if arg.default_value.is_none() {
+                required_arguments_len += 1;
+            }
+
+            function_arguments_clone.push_back(arg);
         }
 
         for (position, argument) in function_call_arguments.into_iter().enumerate() {
@@ -48,16 +52,10 @@ pub fn generic_function_call(
                         break;
                     }
 
-                    let function_argument = required_arguments.pop_front().unwrap();
+                    let function_argument = function_arguments_clone.pop_front().unwrap();
 
-                    if parameters_to_pass_to_the_function
-                        .contains_key(&function_argument.name.bytes)
-                    {
-                        return Err(redefinition_of_parameter(
-                            &function_argument.name,
-                            called_in_line,
-                        ));
-                    }
+                    let function_argument_name_as_number =
+                        string_as_number(&function_argument.name);
 
                     // validate the argument
                     let validation_result = function_argument
@@ -84,7 +82,7 @@ pub fn generic_function_call(
                     }
 
                     parameters_to_pass_to_the_function
-                        .insert(function_argument.name.to_vec(), validation_result.unwrap());
+                        .insert(function_argument_name_as_number, validation_result.unwrap());
                 }
                 Argument::Named(named_argument) => {
                     let mut argument_name = named_argument.name.value.clone();
@@ -93,7 +91,9 @@ pub fn generic_function_call(
                     // since the arguments inside required_arguments are saved with the $ at the beginning
                     argument_name.bytes.insert(0, b'$');
 
-                    if parameters_to_pass_to_the_function.contains_key(&argument_name.bytes) {
+                    let argument_name_as_number = string_as_number(&argument_name);
+
+                    if parameters_to_pass_to_the_function.contains_key(&argument_name_as_number) {
                         return Err(PhpError {
                             level: ErrorLevel::Fatal,
                             message: format!(
@@ -104,22 +104,22 @@ pub fn generic_function_call(
                         });
                     }
 
-                    let argument_position_some = required_arguments
+                    let argument_position_some = function_arguments_clone
                         .iter()
                         .position(|c| c.name == argument_name);
 
                     let Some(argument_position) = argument_position_some else {
-						return Err(PhpError {
-							level: ErrorLevel::Fatal,
-							message: format!(
-								"Unknown named argument {}",
-								get_string_from_bytes(&argument_name)
-							),
-							line: named_argument.name.span.line,
-						})
-					};
+                        return Err(PhpError {
+                            level: ErrorLevel::Fatal,
+                            message: format!(
+                                "Unknown named argument {}",
+                                get_string_from_bytes(&argument_name)
+                            ),
+                            line: named_argument.name.span.line,
+                        });
+                    };
 
-                    let function_arg = required_arguments.remove(argument_position).unwrap();
+                    let function_arg = function_arguments_clone.remove(argument_position).unwrap();
 
                     // from here it is basically the same as working with a positional argument.
                     let validation_result =
@@ -146,25 +146,23 @@ pub fn generic_function_call(
                     }
 
                     parameters_to_pass_to_the_function
-                        .insert(function_arg.name.to_vec(), validation_result.unwrap());
+                        .insert(argument_name_as_number, validation_result.unwrap());
                 }
             }
         }
 
-        let required_arguments_len = required_arguments.len();
-
-        for required_arg in required_arguments {
+        for required_arg in function_arguments_clone {
             let Some(ref default_value) = required_arg.default_value else {
                 return Err(too_few_arguments_to_function(
-					target_name,
-					function_call_arguments_len,
-					required_arguments_len,
-					called_in_line,
-				));
+                    target_name,
+                    function_call_arguments_len,
+                    required_arguments_len,
+                    called_in_line,
+                ));
             };
 
             parameters_to_pass_to_the_function
-                .insert(required_arg.name.to_vec(), default_value.clone());
+                .insert(string_as_number(&required_arg.name), default_value.clone());
         }
     }
 
@@ -175,7 +173,9 @@ pub fn generic_function_call(
     evaluator.change_scope(Rc::new(RefCell::new(new_scope)));
 
     for new_var in parameters_to_pass_to_the_function {
-        evaluator.scope().set_var_value(&new_var.0, new_var.1);
+        evaluator
+            .scope()
+            .add_var_value_with_raw_key(new_var.0, new_var.1);
     }
 
     let mut error = None;
@@ -196,5 +196,5 @@ pub fn generic_function_call(
     }
 
     // TODO: return a value from the function
-    Ok(PhpValue::Null)
+    Ok(PhpValue::new_null())
 }

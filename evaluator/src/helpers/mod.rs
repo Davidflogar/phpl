@@ -5,6 +5,7 @@ use php_parser_rs::{
     parser::{
         self,
         ast::{
+            identifiers::Identifier,
             modifiers::{MethodModifier, VisibilityModifier},
             variables::Variable,
         },
@@ -21,8 +22,8 @@ use crate::{
 };
 
 pub mod callable;
-pub mod object;
 pub mod function_call;
+pub mod object;
 
 pub fn get_span_from_var(var: &Variable) -> Span {
     match var {
@@ -40,8 +41,6 @@ pub fn parse_php_file(
 ) -> Result<PhpValue, PhpError> {
     match parser::parse(content) {
         Ok(ast) => {
-            let mut last_result = PhpValue::Null;
-
             for node in ast {
                 let result = evaluator.eval_statement(node);
 
@@ -52,11 +51,10 @@ pub fn parse_php_file(
 
                     break;
                 }
-
-                last_result = result.unwrap();
             }
 
-            Ok(last_result)
+            // TODO: return a value from the file
+            Ok(PhpValue::new_null())
         }
         Err(err) => {
             let err = err.report(content, Some(input), true, false);
@@ -147,9 +145,11 @@ pub fn php_value_matches_argument_type(
             Ok(())
         }
         PhpArgumentType::True => {
-            let Some(b) = php_value.as_bool() else {
+            if !php_value.is_bool() {
                 return Err("true".to_string());
-            };
+            }
+
+            let b = php_value.as_bool();
 
             if !b {
                 return Err("true".to_string());
@@ -158,9 +158,11 @@ pub fn php_value_matches_argument_type(
             Ok(())
         }
         PhpArgumentType::False => {
-            let Some(b) = php_value.as_bool() else {
+            if !php_value.is_bool() {
                 return Err("false".to_string());
             };
+
+            let b = php_value.as_bool();
 
             if b {
                 return Err("false".to_string());
@@ -196,13 +198,7 @@ pub fn php_value_matches_argument_type(
 
             Ok(())
         }
-        PhpArgumentType::Array => {
-            if !php_value.is_array() {
-                return Err("array".to_string());
-            }
-
-            Ok(())
-        }
+        PhpArgumentType::Array => todo!(),
         PhpArgumentType::Object => {
             if !php_value.is_object() {
                 return Err("object".to_string());
@@ -211,29 +207,37 @@ pub fn php_value_matches_argument_type(
             Ok(())
         }
         PhpArgumentType::Mixed => Ok(()),
-        PhpArgumentType::Callable => {
-            if !php_value.is_callable() {
-                return Err("callable".to_string());
-            }
-
-            Ok(())
-        }
+        PhpArgumentType::Callable => todo!(),
         PhpArgumentType::Iterable => todo!(),
         PhpArgumentType::StaticReference => unreachable!(),
         PhpArgumentType::SelfReference => todo!(),
         PhpArgumentType::ParentReference => todo!(),
         PhpArgumentType::Named(object_name) => {
-            let PhpValue::Object(object) = php_value else {
-				return Err(
-					get_string_from_bytes(&object_name.name)
-				);
-			};
+            if !php_value.is_object() {
+                return Err(get_string_from_bytes(&object_name.name));
+            }
 
-            if !object_name.instance_of_object(object) {
+            let object = php_value.as_object();
+
+            if !object_name.instance_of_object(&object) {
                 return Err(object.get_name_as_string());
             }
 
             Ok(())
         }
     }
+}
+
+pub fn get_identifier_values(ident: Identifier) -> (Vec<u8>, Span) {
+    match ident {
+        Identifier::SimpleIdentifier(i) => (i.value.bytes, i.span),
+        Identifier::DynamicIdentifier(_) => todo!(),
+    }
+}
+
+/// Converts a string (vector of bytes) to a number.
+pub fn string_as_number(string: &[u8]) -> u64 {
+    string
+        .iter()
+        .fold(0u64, |acc, &byte| (acc << 8) | byte as u64)
 }

@@ -12,7 +12,7 @@ use super::{
 #[derive(Debug, Clone)]
 pub struct ObjectName {
     pub parent: Option<Box<ObjectName>>,
-    pub name: Box<[u8]>,
+    pub name: Vec<u8>,
     pub name_line: usize,
 }
 
@@ -21,14 +21,14 @@ impl ObjectName {
         if let Some(parent) = object.get_parent() {
             return Self {
                 parent: Some(Box::new(Self::from_object(parent))),
-                name: object.get_name_as_box(),
+                name: object.get_name_as_vec(),
                 name_line: object.get_name_span().line,
             };
         }
 
         Self {
             parent: None,
-            name: object.get_name_as_box(),
+            name: object.get_name_as_vec(),
             name_line: object.get_name_span().line,
         }
     }
@@ -46,7 +46,7 @@ impl ObjectName {
     }
 
     pub fn instance_of_object(&self, object: &PhpObject) -> bool {
-        if self.name == object.get_name_as_box() {
+        if self.name == object.get_name_as_vec() {
             return true;
         }
 
@@ -59,7 +59,6 @@ impl ObjectName {
 }
 
 /// An enum that represents all data types that are valid to use as parameter in php.
-/// Or all data types that cannot be returned by a function.
 #[derive(Debug, Clone)]
 pub enum PhpArgumentType {
     Null,
@@ -93,12 +92,12 @@ impl PhpArgumentType {
         match value {
             Type::Named(span, name) => {
                 let Some(object) = scope.get_object_by_ref(name) else {
-					return Err(PhpError {
-						level: ErrorLevel::Fatal,
-						message: format!("Undefined type {}", name),
-						line: span.line
-					})
-				};
+                    return Err(PhpError {
+                        level: ErrorLevel::Fatal,
+                        message: format!("Undefined type {}", name),
+                        line: span.line,
+                    });
+                };
 
                 Ok(PhpArgumentType::Named(ObjectName::from_object(object)))
             }

@@ -5,24 +5,23 @@ use php_parser_rs::parser::ast::classes::{ClassMember, ClassStatement};
 use crate::{
     errors::cannot_redeclare_object,
     evaluator::Evaluator,
+    helpers::string_as_number,
     php_data_types::{
         error::{ErrorLevel, PhpError},
         objects::{
             class::{PhpClass, PhpObjectConcreteConstructor},
-            PhpAbstractClass, PhpObject, PhpObjectAbstractMethod, PhpObjectType, PhpTrait,
+            PhpAbstractClass, PhpObject, PhpObjectAbstractMethod, PhpTrait,
         },
-        primitive_data_types::PhpValue,
     },
 };
 
 use super::objects;
 
-pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<PhpValue, PhpError> {
+pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<(), PhpError> {
     if evaluator.scope().object_exists(&class.name.value) {
         return Err(cannot_redeclare_object(
             &class.name.value,
             class.name.span.line,
-            PhpObjectType::Class,
         ));
     }
 
@@ -133,7 +132,10 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
             parent: None,
             properties,
             consts,
-            traits,
+            traits: traits
+                .into_iter()
+                .map(|t| string_as_number(&t.name.value))
+                .collect(),
             abstract_methods,
             abstract_constructor,
             methods,
@@ -147,7 +149,10 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
             parent: None,
             properties,
             consts,
-            traits,
+            traits: traits
+                .into_iter()
+                .map(|t| string_as_number(&t.name.value))
+                .collect(),
             methods,
             constructor: class_constructor,
         })
@@ -159,9 +164,5 @@ pub fn statement(evaluator: &mut Evaluator, class: ClassStatement) -> Result<Php
         new_object.set_parent(parent_object);
     }
 
-    evaluator
-        .scope()
-        .new_object(new_object, PhpObjectType::Class)?;
-
-    Ok(PhpValue::Null)
+    evaluator.scope().new_object(new_object)
 }

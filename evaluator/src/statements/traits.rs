@@ -8,24 +8,18 @@ use crate::{
     php_data_types::{
         error::PhpError,
         objects::{
-            class::PhpObjectConcreteConstructor, PhpObject, PhpObjectAbstractMethod, PhpObjectType,
-            PhpTrait,
+            class::PhpObjectConcreteConstructor, PhpObject, PhpObjectAbstractMethod, PhpTrait,
         },
-        primitive_data_types::PhpValue,
     },
 };
 
 use super::objects;
 
-pub fn statement(
-    evaluator: &mut Evaluator,
-    statement: TraitStatement,
-) -> Result<PhpValue, PhpError> {
+pub fn statement(evaluator: &mut Evaluator, statement: TraitStatement) -> Result<(), PhpError> {
     if evaluator.scope().object_exists(&statement.name.value) {
         return Err(cannot_redeclare_object(
             &statement.name.value,
             statement.name.span.line,
-            PhpObjectType::Trait,
         ));
     }
 
@@ -114,9 +108,5 @@ pub fn statement(
         abstract_constructor,
     };
 
-    evaluator
-        .scope()
-        .new_object(PhpObject::Trait(new_object), PhpObjectType::Trait)?;
-
-    Ok(PhpValue::Null)
+    evaluator.scope().new_object(PhpObject::Trait(new_object))
 }

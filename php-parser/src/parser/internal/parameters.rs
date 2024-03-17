@@ -292,8 +292,8 @@ pub fn single_argument(
 
         // get the argument as positional
         let Argument::Positional(argument) = arg else {
-			unreachable!()
-		};
+            unreachable!()
+        };
 
         if first_argument.is_some() {
             return Some(Err(error::only_one_argument_is_accepted(

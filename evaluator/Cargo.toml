@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 php-parser-rs = { path = "../php-parser" }
+smallvec = "1.13.1"

@@ -28,7 +28,7 @@ use crate::{
     },
     evaluator::Evaluator,
     expressions::reference,
-    helpers::{get_string_from_bytes, php_value_matches_argument_type},
+    helpers::{get_string_from_bytes, php_value_matches_argument_type, string_as_number},
     php_data_types::{
         argument_type::PhpArgumentType,
         error::{ErrorLevel, PhpError},
@@ -38,7 +38,7 @@ use crate::{
     scope::Scope,
 };
 
-use super::{PhpObject, PhpTrait};
+use super::PhpObject;
 
 #[derive(Debug, Clone)]
 pub struct PhpClass {
@@ -46,10 +46,10 @@ pub struct PhpClass {
     pub modifiers: ClassModifierGroup,
     pub attributes: Vec<AttributeGroup>,
     pub parent: Option<Box<PhpObject>>,
-    pub properties: HashMap<Vec<u8>, PhpObjectProperty>,
-    pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
-    pub traits: Vec<PhpTrait>,
-    pub methods: HashMap<Vec<u8>, PhpObjectConcreteMethod>,
+    pub properties: HashMap<u64, PhpObjectProperty>,
+    pub consts: HashMap<u64, PhpObjectConstant>,
+    pub traits: Vec<u64>,
+    pub methods: HashMap<u64, PhpObjectConcreteMethod>,
     pub constructor: Option<PhpObjectConcreteConstructor>,
 }
 
@@ -58,7 +58,7 @@ pub struct PhpObjectProperty {
     pub modifiers: PropertyModifierGroup,
     pub attributes: Vec<AttributeGroup>,
     pub r#type: Option<PhpArgumentType>,
-    pub value: Rc<RefCell<PhpValue>>,
+    pub value: PhpValue,
     pub initialized: bool,
 }
 
@@ -71,10 +71,10 @@ pub struct PhpObjectConstant {
 
 #[derive(Debug, Clone)]
 pub struct PhpObjectConcreteMethod {
+    pub name: SimpleIdentifier,
     pub attributes: Vec<AttributeGroup>,
     pub modifiers: MethodModifierGroup,
     pub return_by_reference: bool,
-    pub name_span: Span,
     pub parameters: Vec<PhpFunctionArgument>,
     pub return_type: Option<ReturnType>,
     pub body: MethodBody,
@@ -122,6 +122,13 @@ impl ConstructorParameter {
     fn get_name_as_vec(&self) -> Vec<u8> {
         self.get_name_as_bytes().to_vec()
     }
+
+    pub fn has_default_value(&self) -> bool {
+        match self {
+            ConstructorParameter::Normal(param) => param.default.is_some(),
+            ConstructorParameter::PromotedProperty(param) => param.default.is_some(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -156,31 +163,35 @@ impl PhpClass {
         new: Span,
     ) -> Result<(), PhpError> {
         let Some(constructor) = self.constructor.as_mut() else {
-			return Ok(());
-		};
+            return Ok(());
+        };
 
-        let mut parameters_to_pass_to_the_constructor = HashMap::new();
+        let mut parameters_to_pass_to_the_constructor: HashMap<u64, PhpValue> = HashMap::new();
 
         if !constructor.parameters.is_empty() {
             let constructor_parameters_len = constructor.parameters.len();
             let target_name = format!("{}::{}", self.name, constructor.name);
 
             let Some(constructor_call_arguments) = arguments else {
-
-				return Err(too_few_arguments_to_function(
-					target_name,
-					0,
-					constructor_parameters_len,
-					new.line,
-				))
-			};
+                return Err(too_few_arguments_to_function(
+                    target_name,
+                    0,
+                    constructor_parameters_len,
+                    new.line,
+                ));
+            };
 
             let called_in_line = constructor_call_arguments.left_parenthesis.line;
 
-            let mut required_arguments = VecDeque::new();
+            let mut function_arguments_clone = VecDeque::new();
+            let mut required_arguments_len = 0;
 
-            for arg in &constructor.parameters {
-                required_arguments.push_back(arg);
+            for arg in constructor.parameters.clone() {
+                if !arg.has_default_value() {
+                    required_arguments_len += 1;
+                }
+
+                function_arguments_clone.push_back(arg);
             }
 
             let constructor_call_paremeters_len = constructor_call_arguments.arguments.len();
@@ -192,7 +203,7 @@ impl PhpClass {
                             break;
                         }
 
-                        let constructor_arg = required_arguments.pop_front().unwrap();
+                        let constructor_arg = function_arguments_clone.pop_front().unwrap();
 
                         // validate the argument
                         let validation_result = constructor_arg
@@ -219,45 +230,48 @@ impl PhpClass {
                         }
 
                         parameters_to_pass_to_the_constructor.insert(
-                            constructor_arg.get_name_as_vec(),
+                            string_as_number(constructor_arg.get_name_as_bytes()),
                             validation_result.unwrap(),
                         );
                     }
-                    Argument::Named(named_argument) => {
-                        let mut argument_name = named_argument.name.value.clone();
+                    Argument::Named(mut named_argument) => {
+                        let argument_name = &mut named_argument.name.value;
 
                         // add the $ at the beginning
                         // since the arguments inside required_arguments are saved with the $ at the beginning
                         argument_name.bytes.insert(0, b'$');
+                        let argument_name_as_number = string_as_number(argument_name);
 
-                        if parameters_to_pass_to_the_constructor.contains_key(&argument_name.bytes)
+                        if parameters_to_pass_to_the_constructor
+                            .contains_key(&argument_name_as_number)
                         {
                             return Err(PhpError {
                                 level: ErrorLevel::Fatal,
                                 message: format!(
                                     "Named argument {} overwrites previous argument",
-                                    get_string_from_bytes(&argument_name)
+                                    get_string_from_bytes(argument_name)
                                 ),
                                 line: named_argument.name.span.line,
                             });
                         }
 
-                        let argument_position_some = required_arguments
+                        let argument_position_some = function_arguments_clone
                             .iter()
-                            .position(|c| c.get_name_as_bytes() == argument_name.to_vec());
+                            .position(|c| c.get_name_as_bytes() == argument_name.bytes);
 
                         let Some(argument_position) = argument_position_some else {
-							return Err(PhpError {
-								level: ErrorLevel::Fatal,
-								message: format!(
-									"Unknown named argument {}",
-									get_string_from_bytes(&argument_name)
-								),
-								line: named_argument.name.span.line,
-							})
-						};
+                            return Err(PhpError {
+                                level: ErrorLevel::Fatal,
+                                message: format!(
+                                    "Unknown named argument {}",
+                                    get_string_from_bytes(argument_name)
+                                ),
+                                line: named_argument.name.span.line,
+                            });
+                        };
 
-                        let constructor_arg = required_arguments.remove(argument_position).unwrap();
+                        let constructor_arg =
+                            function_arguments_clone.remove(argument_position).unwrap();
 
                         // from here it is basically the same as working with a positional argument.
                         let validation_result = constructor_arg
@@ -283,51 +297,38 @@ impl PhpClass {
                             return Err(error.unwrap());
                         }
 
-                        parameters_to_pass_to_the_constructor.insert(
-                            constructor_arg.get_name_as_vec(),
-                            validation_result.unwrap(),
-                        );
+                        parameters_to_pass_to_the_constructor
+                            .insert(argument_name_as_number, validation_result.unwrap());
                     }
                 }
             }
 
-            let required_arguments_len = required_arguments.len();
-
-            for required_arg in required_arguments {
+            for required_arg in function_arguments_clone {
                 match required_arg {
                     ConstructorParameter::Normal(param) => {
-                        let Some(ref default_value) = param.default else {
-							return Err(too_few_arguments_to_function(
-								target_name,
-								constructor_call_paremeters_len,
-								required_arguments_len,
-								called_in_line,
-							));
-						};
+                        let Some(default_value) = param.default else {
+                            return Err(too_few_arguments_to_function(
+                                target_name,
+                                constructor_call_paremeters_len,
+                                required_arguments_len,
+                                called_in_line,
+                            ));
+                        };
 
                         parameters_to_pass_to_the_constructor
-                            .insert(param.name.clone(), default_value.clone());
+                            .insert(string_as_number(&param.name), default_value);
                     }
                     ConstructorParameter::PromotedProperty(promoted_property) => {
-                        let Some(ref default_value) = promoted_property.default else {
-							return Err(too_few_arguments_to_function(
-								target_name,
-								constructor_call_paremeters_len,
-								required_arguments_len,
-								called_in_line,
-							));
-						};
+                        let Some(default_value) = promoted_property.default else {
+                            return Err(too_few_arguments_to_function(
+                                target_name,
+                                constructor_call_paremeters_len,
+                                required_arguments_len,
+                                called_in_line,
+                            ));
+                        };
 
-                        let property_value_as_reference =
-                            Rc::new(RefCell::new(default_value.clone()));
-
-                        // insert the parameter
-                        parameters_to_pass_to_the_constructor.insert(
-                            promoted_property.name.clone(),
-                            PhpValue::Reference(Rc::clone(&property_value_as_reference)),
-                        );
-
-                        // insert the property
+                        // convert the promoted_property_modifiers to property_modifiers
                         let mut property_modifiers = vec![];
 
                         for promoted_property_modifier in &promoted_property.modifiers.modifiers {
@@ -347,15 +348,33 @@ impl PhpClass {
                             }
                         }
 
+                        let value_as_reference = match default_value {
+                            PhpValue::Owned(value) => {
+                                Rc::new(RefCell::new(value))
+                            }
+                            PhpValue::Reference(value) => {
+                                value
+                            }
+                        };
+
+                        let promoted_property_name_as_number =
+                            string_as_number(&promoted_property.name);
+
+                        // insert the parameter
+                        parameters_to_pass_to_the_constructor.insert(
+                            promoted_property_name_as_number,
+                            PhpValue::Reference(Rc::clone(&value_as_reference)),
+                        );
+
                         self.properties.insert(
-                            promoted_property.name.clone(),
+                            promoted_property_name_as_number,
                             PhpObjectProperty {
                                 modifiers: PropertyModifierGroup {
                                     modifiers: property_modifiers,
                                 },
-                                attributes: promoted_property.attributes.clone(),
-                                r#type: promoted_property.data_type.clone(),
-                                value: property_value_as_reference,
+                                attributes: promoted_property.attributes,
+                                r#type: promoted_property.data_type,
+                                value: PhpValue::Reference(Rc::clone(&value_as_reference)),
                                 initialized: true,
                             },
                         );
@@ -371,7 +390,9 @@ impl PhpClass {
         evaluator.change_scope(Rc::new(RefCell::new(new_scope)));
 
         for new_var in parameters_to_pass_to_the_constructor {
-            evaluator.scope().set_var_value(&new_var.0, new_var.1);
+            evaluator
+                .scope()
+                .add_var_value_with_raw_key(new_var.0, new_var.1);
         }
 
         // execute the function

@@ -14,34 +14,36 @@ pub fn expression(
     evaluator: &mut Evaluator,
     expression: NewExpression,
 ) -> Result<PhpValue, PhpError> {
-    let mut target_name = vec![];
+    let target_name: Vec<u8>;
 
     if let Expression::Identifier(ref ident) = *expression.target {
         match ident {
-            Identifier::SimpleIdentifier(i) => target_name.extend(&i.value.bytes),
+            Identifier::SimpleIdentifier(i) => target_name = i.value.bytes.clone(),
             Identifier::DynamicIdentifier(_) => todo!(),
         }
     } else {
         let value = evaluator.eval_expression(*expression.target)?;
 
-        let PhpValue::String(name) = value else {
-            return Err(PhpError{
+        if !value.is_string() {
+            return Err(PhpError {
                 level: ErrorLevel::Fatal,
-				message: "Name must be a valid object or a string".to_string(),
-				line: expression.new.line,
-			});
+                message: "Name must be a valid object or a string".to_string(),
+                line: expression.new.line,
+            });
         };
 
-        target_name.extend(&name);
+        let value_as_string = value.into_string();
+
+        target_name = value_as_string.into_vec();
     }
 
     let Some(object) = evaluator.scope().get_object_cloned(&target_name) else {
-		return Err(PhpError{
-			level: ErrorLevel::Fatal,
-			message: format!("Class {} not found", get_string_from_bytes(&target_name)),
-			line: expression.new.line,
-		});
-	};
+        return Err(PhpError {
+            level: ErrorLevel::Fatal,
+            message: format!("Class {} not found", get_string_from_bytes(&target_name)),
+            line: expression.new.line,
+        });
+    };
 
     let mut class = match object {
         PhpObject::Class(class) => class,
@@ -69,5 +71,5 @@ pub fn expression(
 
     class.call_constructor(evaluator, expression.arguments, expression.new)?;
 
-    Ok(PhpValue::Object(PhpObject::Class(class)))
+    Ok(PhpValue::new_object(PhpObject::Class(class)))
 }

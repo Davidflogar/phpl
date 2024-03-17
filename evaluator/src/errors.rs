@@ -4,7 +4,6 @@ use crate::{
     helpers::get_string_from_bytes,
     php_data_types::{
         error::{ErrorLevel, PhpError},
-        objects::PhpObjectType,
         primitive_data_types::NULL,
     },
 };
@@ -89,17 +88,11 @@ pub fn cannot_use_default_value_for_parameter(
     }
 }
 
-pub fn cannot_redeclare_object(name: &[u8], line: usize, object_type: PhpObjectType) -> PhpError {
-    let object_type = match object_type {
-        PhpObjectType::Class => "class",
-        PhpObjectType::Trait => "trait",
-    };
-
+pub fn cannot_redeclare_object(name: &[u8], line: usize) -> PhpError {
     PhpError {
         level: ErrorLevel::Fatal,
         message: format!(
-            "Cannot declare {} {} because the name is already in use",
-            object_type,
+            "Cannot declare object {} because the name is already in use",
             get_string_from_bytes(name)
         ),
         line,
@@ -121,18 +114,18 @@ pub fn method_has_not_been_applied_because_of_collision(
     collision_with: &[u8],
     line: usize,
 ) -> PhpError {
-    let method_name_str = get_string_from_bytes(method_name);
+    let method_name_as_string = get_string_from_bytes(method_name);
 
     PhpError {
         level: ErrorLevel::Fatal,
         message: format!(
             "Trait method {}::{} has not been applied as {}::{}, because of collision with {}::{}",
             get_string_from_bytes(bad_trait),
-            method_name_str,
+            method_name_as_string,
             class_name,
-            method_name_str,
+            method_name_as_string,
             get_string_from_bytes(collision_with),
-            method_name_str,
+            method_name_as_string,
         ),
         line,
     }
@@ -188,9 +181,7 @@ pub fn too_few_arguments_to_function(
         level: ErrorLevel::Fatal,
         message: format!(
             "Too few arguments to function {}(), {} passed and exactly {} was expected",
-            function_name,
-            passed,
-            require
+            function_name, passed, require
         ),
         line,
     }

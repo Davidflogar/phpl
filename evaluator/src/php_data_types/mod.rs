@@ -51,14 +51,14 @@ mod macros {
 
 								if !self.modifiers.has_abstract() {
 									// validate the abstract methods/constructor
-									let mut remaining_abstract_methods: Vec<String> = vec![];
+									let mut remaining_abstract_methods = vec![];
 
 									for (name, method) in &parent.abstract_methods {
 
 										let current_method_option = self.methods.get(name);
 
 										let Some(current_method) = current_method_option else {
-											remaining_abstract_methods.push(get_string_from_bytes(&name));
+											remaining_abstract_methods.push(get_string_from_bytes(&method.name));
 
 											continue;
 										};
@@ -77,8 +77,9 @@ mod macros {
 												};
 
 												format!(
-													"{}{}{}",
+													"{}{}{}{}",
 													data_type_as_string,
+													if parameter.pass_by_reference {"&"} else {""},
 													if parameter.is_variadic {"..."} else {""},
 													get_string_from_bytes(&parameter.name),
 												)
@@ -89,10 +90,10 @@ mod macros {
 												message: format!(
 													"Declaration of {}::{}() must be compatible with {}{}::{}({}){}",
 													get_string_from_bytes(&self.name.value),
-													get_string_from_bytes(&name),
+													get_string_from_bytes(&method.name),
 													if method.return_by_reference {"&"} else {""},
 													get_string_from_bytes(&parent.name.value),
-													get_string_from_bytes(&name),
+													get_string_from_bytes(&method.name),
 													method.parameters
 														.iter()
 														.map(|parameter| format_parameter(parameter))
@@ -104,7 +105,7 @@ mod macros {
 														String::new()
 													}
 												),
-												line: current_method.name_span.line,
+												line: current_method.name.span.line,
 											});
 										}
 									}

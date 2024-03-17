@@ -13,7 +13,8 @@ use php_parser_rs::{
 };
 
 use crate::helpers::{
-    extend_hashmap_without_overwrite, get_string_from_bytes, visibility_modifier_to_method_modifier,
+    extend_hashmap_without_overwrite, get_string_from_bytes, string_as_number,
+    visibility_modifier_to_method_modifier,
 };
 
 use self::class::{
@@ -34,12 +35,6 @@ pub enum PhpObject {
     Class(PhpClass),
     AbstractClass(PhpAbstractClass),
     Trait(PhpTrait),
-}
-
-pub enum PhpObjectType {
-    /// Both abstract classes and normal classes.
-    Class,
-    Trait,
 }
 
 impl PhpObject {
@@ -99,11 +94,11 @@ impl PhpObject {
         }
     }
 
-    pub fn get_name_as_box(&self) -> Box<[u8]> {
+    pub fn get_name_as_vec(&self) -> Vec<u8> {
         match self {
-            PhpObject::Class(class) => class.name.value.bytes.clone().into_boxed_slice(),
-            PhpObject::AbstractClass(class) => class.name.value.bytes.clone().into_boxed_slice(),
-            PhpObject::Trait(trait_) => trait_.name.value.bytes.clone().into_boxed_slice(),
+            PhpObject::Class(class) => class.name.value.bytes.clone(),
+            PhpObject::AbstractClass(class) => class.name.value.bytes.clone(),
+            PhpObject::Trait(trait_) => trait_.name.value.bytes.clone(),
         }
     }
 }
@@ -114,17 +109,18 @@ pub struct PhpAbstractClass {
     pub modifiers: ClassModifierGroup,
     pub attributes: Vec<AttributeGroup>,
     pub parent: Option<Box<PhpObject>>,
-    pub properties: HashMap<Vec<u8>, PhpObjectProperty>,
-    pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
-    pub traits: Vec<PhpTrait>,
-    pub abstract_methods: HashMap<Vec<u8>, PhpObjectAbstractMethod>,
+    pub properties: HashMap<u64, PhpObjectProperty>,
+    pub consts: HashMap<u64, PhpObjectConstant>,
+    pub traits: Vec<u64>,
+    pub abstract_methods: HashMap<u64, PhpObjectAbstractMethod>,
     pub abstract_constructor: Option<PhpObjectAbstractMethod>,
-    pub methods: HashMap<Vec<u8>, PhpObjectConcreteMethod>,
+    pub methods: HashMap<u64, PhpObjectConcreteMethod>,
     pub constructor: Option<PhpObjectConcreteConstructor>,
 }
 
 #[derive(Debug, Clone)]
 pub struct PhpObjectAbstractMethod {
+    pub name: Vec<u8>,
     pub attributes: Vec<AttributeGroup>,
     pub modifiers: MethodModifierGroup,
     pub return_by_reference: bool,
@@ -136,12 +132,12 @@ pub struct PhpObjectAbstractMethod {
 pub struct PhpTrait {
     pub name: SimpleIdentifier,
     pub attributes: Vec<AttributeGroup>,
-    pub properties: HashMap<Vec<u8>, PhpObjectProperty>,
-    pub consts: HashMap<Vec<u8>, PhpObjectConstant>,
+    pub properties: HashMap<u64, PhpObjectProperty>,
+    pub consts: HashMap<u64, PhpObjectConstant>,
     pub traits: Vec<PhpTrait>,
-    pub concrete_methods: HashMap<Vec<u8>, PhpObjectConcreteMethod>,
+    pub concrete_methods: HashMap<u64, PhpObjectConcreteMethod>,
     pub concrete_constructor: Option<PhpObjectConcreteConstructor>,
-    pub abstract_methods: HashMap<Vec<u8>, PhpObjectAbstractMethod>,
+    pub abstract_methods: HashMap<u64, PhpObjectAbstractMethod>,
     pub abstract_constructor: Option<PhpObjectAbstractMethod>,
 }
 
@@ -149,42 +145,49 @@ impl PhpTrait {
     /// Sets an alias for the given method, deleting the previous key.
     pub fn set_alias(
         &mut self,
-        key: &[u8],
-        alias: &[u8],
+        old_name: &[u8],
+        new_name: &[u8],
         class_name: &str,
         line: usize,
         visibility: Option<&VisibilityModifier>,
     ) -> Result<(), PhpError> {
-        if !self.concrete_methods.contains_key(key) && !self.abstract_methods.contains_key(key) {
+        let old_name_as_number = string_as_number(old_name);
+        let new_name_as_number = string_as_number(new_name);
+
+        if !self.concrete_methods.contains_key(&old_name_as_number)
+            && !self.abstract_methods.contains_key(&old_name_as_number)
+        {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "An alias ({}) was defined for method {} but this method does not exist",
-                    get_string_from_bytes(alias),
-                    get_string_from_bytes(key),
+                    get_string_from_bytes(new_name),
+                    get_string_from_bytes(old_name),
                 ),
                 line,
             });
         }
 
-        if self.concrete_methods.contains_key(alias) || self.abstract_methods.contains_key(alias) {
+        if self.concrete_methods.contains_key(&new_name_as_number)
+            || self.abstract_methods.contains_key(&new_name_as_number)
+        {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
 					"Trait method {}::{} has not been applied as {}::{}, because of collision with {}::{}",
 					&self.name.value.to_string(),
-					get_string_from_bytes(key),
+					get_string_from_bytes(old_name),
 					class_name,
-					get_string_from_bytes(alias),
+					get_string_from_bytes(new_name),
 					&self.name.value.to_string(),
-					get_string_from_bytes(alias),
+					get_string_from_bytes(new_name),
 				),
                 line,
             });
         }
 
-        if self.concrete_methods.contains_key(key) {
-            let mut concrete_method = self.concrete_methods.remove(key).unwrap();
+        if self.concrete_methods.contains_key(&old_name_as_number) {
+            let mut concrete_method = self.concrete_methods.remove(&old_name_as_number).unwrap();
 
             if let Some(visibility) = visibility {
                 concrete_method.modifiers.modifiers =
@@ -192,11 +195,11 @@ impl PhpTrait {
             }
 
             self.concrete_methods
-                .insert(alias.to_vec(), concrete_method);
+                .insert(new_name_as_number, concrete_method);
 
             return Ok(());
-        } else if self.abstract_methods.contains_key(key) {
-            let mut abstract_method = self.abstract_methods.remove(key).unwrap();
+        } else if self.abstract_methods.contains_key(&old_name_as_number) {
+            let mut abstract_method = self.abstract_methods.remove(&old_name_as_number).unwrap();
 
             if let Some(visibility) = visibility {
                 abstract_method.modifiers.modifiers =
@@ -204,7 +207,7 @@ impl PhpTrait {
             }
 
             self.abstract_methods
-                .insert(alias.to_vec(), abstract_method);
+                .insert(new_name_as_number, abstract_method);
 
             return Ok(());
         }
@@ -214,7 +217,7 @@ impl PhpTrait {
             message: format!(
                 "An alias was defined for {}::{} but this method does not exist",
                 &self.name.value.to_string(),
-                get_string_from_bytes(key)
+                get_string_from_bytes(old_name)
             ),
             line,
         })
@@ -228,6 +231,8 @@ impl PhpTrait {
         line: usize,
         method_name: &SimpleIdentifier,
     ) -> Result<(), PhpError> {
+        let key = &string_as_number(key);
+
         if !self.concrete_methods.contains_key(key) && !self.abstract_methods.contains_key(key) {
             return Err(PhpError {
                 level: ErrorLevel::Fatal,
@@ -259,6 +264,8 @@ impl PhpTrait {
     }
 
     pub fn remove_method(&mut self, method_name: &[u8]) {
+        let method_name = &string_as_number(method_name);
+
         self.concrete_methods.remove(method_name);
         self.abstract_methods.remove(method_name);
     }

@@ -17,10 +17,10 @@ pub fn expression(
             let result = evaluator.get_variable_name(variable);
 
             let Ok(var_name) = result else {
-				return Err((result.unwrap_err(), false));
-			};
+                return Err((result.unwrap_err(), false));
+            };
 
-            Ok(PhpValue::Reference(evaluator.scope().new_ref(&var_name)))
+            Ok(evaluator.scope().new_ref(var_name))
         }
         _ => Err((
             PhpError {

@@ -4,22 +4,22 @@ use php_parser_rs::lexer::token::Span;
 
 use crate::{
     errors::cannot_redeclare_object,
-    helpers::get_string_from_bytes,
+    helpers::{get_string_from_bytes, string_as_number},
     php_data_types::{
         error::{ErrorLevel, PhpError},
-        objects::{PhpObject, PhpObjectType},
+        objects::PhpObject,
         primitive_data_types::{PhpIdentifier, PhpValue},
     },
 };
 
 #[derive(Clone)]
 pub struct Scope {
-    vars: HashMap<Vec<u8>, Rc<RefCell<PhpValue>>>,
+    vars: HashMap<u64, PhpValue>,
 
     /// Identifiers such as functions or constants.
-    identifiers: HashMap<Vec<u8>, PhpIdentifier>,
+    identifiers: HashMap<u64, PhpIdentifier>,
 
-    objects: HashMap<Vec<u8>, PhpObject>,
+    objects: HashMap<u64, PhpObject>,
 }
 
 impl Scope {
@@ -31,34 +31,40 @@ impl Scope {
         }
     }
 
-    pub fn delete_var(&mut self, key: &[u8]) {
-        self.vars.remove(key);
-    }
-
     /// Sets the value of a variable. If the variable does not exist, it is created.
-    /// But if the variable exists and is a reference, it is updated.
-    pub fn set_var_value(&mut self, key: &[u8], value: PhpValue) {
-        if let Some(var) = self.vars.get(key) {
-            let mut var_ref = var.borrow_mut();
-
-            match &mut *var_ref {
-                PhpValue::Reference(ref_value) => {
-                    *ref_value.borrow_mut() = value;
+    fn set_var_value(&mut self, key: u64, new_value: PhpValue) {
+        if let Some(var) = self.vars.get_mut(&key) {
+            match new_value {
+                PhpValue::Reference(reference_to) => {
+                    *var = PhpValue::Reference(reference_to);
                 }
-                _ => {
-                    *var_ref = value;
-                }
+                PhpValue::Owned(value) => match var {
+                    PhpValue::Owned(_) => {
+                        *var = PhpValue::Owned(value);
+                    }
+                    PhpValue::Reference(reference_to) => {
+                        *reference_to.borrow_mut() = value;
+                    }
+                },
             }
-
-            return;
+        } else {
+            self.vars.insert(key, new_value);
         }
-
-        self.vars.insert(key.to_vec(), Rc::new(RefCell::new(value)));
     }
 
-    pub fn get_var(&self, key: &[u8]) -> Option<PhpValue> {
+    pub fn add_var_value(&mut self, key: Vec<u8>, new_value: PhpValue) {
+        let key = string_as_number(&key);
+
+        self.set_var_value(key, new_value);
+    }
+
+    pub fn add_var_value_with_raw_key(&mut self, key: u64, new_value: PhpValue) {
+        self.set_var_value(key, new_value);
+    }
+
+    pub fn get_var(&self, key: &[u8]) -> Option<&PhpValue> {
         let key = if key.is_empty() || key[0] != b'$' {
-            let mut new_key: Vec<u8> = vec![b'$'];
+            let mut new_key = vec![b'$'];
 
             new_key.extend(key);
 
@@ -67,33 +73,61 @@ impl Scope {
             key.to_vec()
         };
 
-        let value = self.vars.get(&key);
+        self.vars.get(&string_as_number(&key))
+    }
 
-        value.map(|value| value.borrow().clone())
+    pub fn delete_var(&mut self, key: &[u8]) -> Option<PhpValue> {
+        let key = if key.is_empty() || key[0] != b'$' {
+            let mut new_key = vec![b'$'];
+
+            new_key.extend(key);
+
+            new_key
+        } else {
+            key.to_vec()
+        };
+
+        self.vars.remove(&string_as_number(&key))
     }
 
     pub fn var_exists(&self, key: &[u8]) -> bool {
-        self.vars.contains_key(key)
+        self.vars.contains_key(&string_as_number(key))
     }
 
     /// Returns a reference to the value of the variable. If the variable does not exist, it is created.
-    pub fn new_ref(&mut self, to: &[u8]) -> Rc<RefCell<PhpValue>> {
-        if !self.var_exists(to) {
-            self.set_var_value(to, PhpValue::Null);
+    pub fn new_ref(&mut self, to: Vec<u8>) -> PhpValue {
+        let to = string_as_number(&to);
+
+        self.vars.entry(to).or_insert_with(PhpValue::new_null);
+
+        let reference = self.vars.remove(&to).unwrap();
+
+        match reference {
+            PhpValue::Owned(value) => {
+                // convert the value to a reference
+                let value_to_reference = Rc::new(RefCell::new(value));
+
+                let return_value = PhpValue::Reference(Rc::clone(&value_to_reference));
+
+                // insert the value back into the scope
+                self.vars
+                    .insert(to, PhpValue::Reference(value_to_reference));
+
+                return_value
+            }
+            PhpValue::Reference(reference) => {
+                let return_value = PhpValue::Reference(Rc::clone(&reference));
+
+                // insert the reference back into the scope
+                self.vars.insert(to, PhpValue::Reference(reference));
+
+                return_value
+            }
         }
-
-        let reference = self.vars.get(to).unwrap();
-
-		// If the value is a reference, return the reference.
-		if let PhpValue::Reference(ref_value) = &*reference.borrow() {
-			return Rc::clone(ref_value);
-		}
-
-        Rc::clone(reference)
     }
 
     pub fn get_ident(&self, key: &[u8]) -> Option<&PhpIdentifier> {
-        self.identifiers.get(key)
+        self.identifiers.get(&string_as_number(key))
     }
 
     pub fn new_ident(
@@ -102,12 +136,12 @@ impl Scope {
         value: PhpIdentifier,
         span: Span,
     ) -> Result<(), PhpError> {
-        match self.identifiers.entry(ident.to_vec()) {
+        match self.identifiers.entry(string_as_number(ident)) {
             std::collections::hash_map::Entry::Occupied(entry) => Err(PhpError {
                 level: ErrorLevel::Fatal,
                 message: format!(
                     "Cannot redeclare identifier {}, there is already a {} using this name",
-                    get_string_from_bytes(entry.key()),
+                    get_string_from_bytes(ident),
                     if entry.get().is_function() {
                         "function"
                     } else {
@@ -125,33 +159,28 @@ impl Scope {
     }
 
     pub fn object_exists(&self, ident: &[u8]) -> bool {
-        self.objects.contains_key(ident)
+        self.objects.contains_key(&string_as_number(ident))
     }
 
-    pub fn new_object(
-        &mut self,
-        value: PhpObject,
-        object_type: PhpObjectType,
-    ) -> Result<(), PhpError> {
+    pub fn new_object(&mut self, value: PhpObject) -> Result<(), PhpError> {
         if self.object_exists(value.get_name_as_bytes()) {
             Err(cannot_redeclare_object(
                 value.get_name_as_bytes(),
                 value.get_name_span().line,
-                object_type,
             ))
         } else {
             self.objects
-                .insert(value.get_name_as_bytes().to_vec(), value);
+                .insert(string_as_number(value.get_name_as_bytes()), value);
 
             Ok(())
         }
     }
 
     pub fn get_object_cloned(&self, ident: &[u8]) -> Option<PhpObject> {
-        self.objects.get(ident).cloned()
+        self.objects.get(&string_as_number(ident)).cloned()
     }
 
     pub fn get_object_by_ref(&self, ident: &[u8]) -> Option<&PhpObject> {
-        self.objects.get(ident)
+        self.objects.get(&string_as_number(ident))
     }
 }

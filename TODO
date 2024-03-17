@@ -5,5 +5,7 @@
 - You should not be able to use ellipsis in functions like empty or isset
 - Only the last parameter can be variadic in all functions (from the parser)
 - Avoid repeated argument names in functions and constructors
-- Make it possible to perform only arithmetic operations on the appropriate data types and not attempt to convert data types.
 - Add stack trace for exceptions
+- Try to optimize assignment operations
+- Adapt the `call_constructor` method of the struct `PhpClass` to the function `evaluator/src/helpers/function_call::generic_function_call` to avoid repeating code.
+- Add constant expressions to the parser when adding a default value to a parameter in a function
